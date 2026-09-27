@@ -4804,9 +4804,13 @@ def _ask(prompt, default=None, auto=None):
         print(f"  [自动模式] {prompt.strip()} -> {ans if ans else '(回车默认)'}")
         return ans
     try: s = input(prompt).strip()
-    except (EOFError, KeyboardInterrupt):
+    except EOFError:
         print()
-        return default if default is not None else "0"
+        print("[!] 标准输入已关闭（EOF）。本次使用默认值。若在交互场景，请检查终端是否正常。")
+        return default if default is not None else ""
+    except KeyboardInterrupt:
+        print()
+        return default if default is not None else ""
     return s or (default if default is not None else "")
 
 
@@ -6136,9 +6140,27 @@ def run_wizard():
         "c": ("导出状态总表", step_export_excel),
         "e": ("批量验收", flow_batch_accept),
     }
+    _eof_n = 0        # 连续 EOF 计数（stdin 关闭时防死循环；读到输入即清零）
     while True:
         print(MENU)
-        c = _ask("请选择操作: ", "0").lower()
+        # 修「空回车静默退出」：不再走 _ask(默认 "0")——直读 input：空回车/Ctrl+C 重显示菜单，
+        # 仅显式输入 0 才退出；连续 2 次 EOF（stdin 不可用，如 <nul 重定向）才提示并退出。
+        try:
+            c = input("请选择操作: ").strip().lower()
+            _eof_n = 0
+        except KeyboardInterrupt:
+            print()
+            continue                       # Ctrl+C 不再退出，重显示菜单
+        except EOFError:
+            _eof_n += 1
+            print()
+            if _eof_n >= 2:
+                print(">>> [!] 标准输入不可用（连续 EOF）。请用 run.cmd 启动，或确保在交互式终端运行。")
+                return
+            print("[!] 未读到输入（EOF），请重新输入（再遇 EOF 将退出）。")
+            continue
+        if not c:
+            continue                        # 空回车 -> 重显示菜单，不退出
         try:
             if c in actions:
                 act_name, fn = actions[c]
