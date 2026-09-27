@@ -1074,7 +1074,9 @@ def batch_accept(batch_ids=None, file_ids=None, run_id=None, operator="manual", 
       file_ids  —— 具体 file_id 列表/单个（注意：file_id 仅批内唯一，跨批会命中同名，仅在确定无歧义时用）；
       pairs     —— 精确 (batch_id, file_id) 对列表 [[b,f],...] 或 [{batch_id,file_id},...]（看板多选专用，最安全）。
     严格只碰 step=8 且 status='pending_accept' 的行；fail/error/rejected/已 accepted/其它 step 一律不动。
-    事务：BEGIN IMMEDIATE；幂等（重复调用第二次 accepted=0）；分块 executemany 防变量过多。
+    事务：BEGIN IMMEDIATE；幂等（重复调用第二次 accepted=0）：已 accepted 行不进入候选、不被重写
+      （skipped 仅计数）；accepted_at 用 COALESCE 保留首次验收时间不刷新；batches 级推进条件同理重复无害；
+    分块 executemany 防变量过多。
     同步：写 accepted_at/accepted_by；某批范围内已无 pending_accept 时把 batches.status 推进为 accepted 并记批次级 accepted_at/by。
     返回 {"ok": bool, "accepted": n, "skipped": m, "errors": [...]}（skipped=范围内 step=8 但非 pending_accept 的存量行，未受影响）。
     说明：这是“状态验收”（DB 位）；把文件物理归档移入「文库资源_completed」仍由 pipeline.step_accept 逐文件执行。"""

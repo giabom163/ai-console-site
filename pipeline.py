@@ -5189,7 +5189,8 @@ def flow_all():
     # 全流程收尾：zip 不存在 -> 提示"未真正完成"；批次 running 落 done/incomplete（仅确实打过包时收尾，防误改）。
     _zip_ok = bool(_final_zip_check())
     _bid = bc.current_batch_id() if bc is not None else None
-    if _bid and _LAST_PACK_ZIP:
+    # topic 多专题时 _LAST_PACK_ZIP 仅记首个，"是否打过包"判定须并读 _LAST_PACK_ZIPS（兼容旧路径）
+    if _bid and (_LAST_PACK_ZIP or _LAST_PACK_ZIPS):
         _bst = "done" if _zip_ok else "incomplete"
         if bc.set_batch_status(_bid, _bst, note="" if _zip_ok else "未生成最终 zip"):
             print(f">>> [batch] 批次 {_bid} 状态 -> {_bst}")
@@ -5248,12 +5249,14 @@ def flow_auto():
     rc = run_auto(ns)
     if rc == 0:
         # 修「假成功」：rc==0 同时涵盖"真有产出"与"零新增空结束"，须用本次是否真产出 zip 区分
-        # （_LAST_PACK_ZIP 已在 run_auto 开头重置，故此值严格反映本次运行）。
-        if _LAST_PACK_ZIP:
+        # （两个产出标志已在 run_auto 开头重置，故此值严格反映本次运行）。
+        _nz = len(_LAST_PACK_ZIPS) or (1 if _LAST_PACK_ZIP else 0)
+        if _nz:
+            _suffix = f"（共 {_nz} 个专题 zip）" if _nz > 1 else ""
             if AUTO_ACCEPT:
-                print("\n>>> 一键全自动已完成 [OK] 打包 zip 已产出（见「文库资源_打包文件」）且已自动验收（accepted）。")
+                print(f"\n>>> 一键全自动已完成 [OK] 打包 zip 已产出{_suffix}（见「文库资源_打包文件」）且已自动验收（accepted）。")
             else:
-                print("\n>>> 一键全自动已完成 [OK] 打包 zip 已产出（见「文库资源_打包文件」），"
+                print(f"\n>>> 一键全自动已完成 [OK] 打包 zip 已产出{_suffix}（见「文库资源_打包文件」），"
                       "已标为待验收；请去「文件看板」或用菜单 [e] 批量验收。")
         else:
             print("\n>>> 本次无新增 PDF，未产生新 zip，未执行自动验收；批次保持原状态。")
@@ -6012,7 +6015,7 @@ def _run_auto_impl(args):
                 return 1
         # ---- 空结果正常结束：本次既无"新下载"、本轮也未产出任何 zip -> 视为"本批无新 PDF"，退出码 0。
         #      绝不进后续打包/验收、绝不写"全流程未真正完成"（修问题 2；旧 pending_accept 不回滚也不新置）。----
-        if _new_total == 0 and not _LAST_PACK_ZIP:
+        if _new_total == 0 and not _LAST_PACK_ZIP and not _LAST_PACK_ZIPS:
             print(">>> [auto] 本批无新 PDF，正常结束（无需打包）。")
             print(">>> [auto] 本次零新增，未产出本批次 zip，不触发自动验收（批次保持原状态）。")
             print(_SEP)
@@ -6450,8 +6453,9 @@ def main():
     if "all" in steps and not args.dry_run:
         _zip_ok = bool(_final_zip_check())
         # 批次收尾：running 落为 done/incomplete（仅本轮机确实打过包时收尾，避免误改旧批次）。
+        # topic 多专题时 _LAST_PACK_ZIP 仅记首个，"是否打过包"判定须并读 _LAST_PACK_ZIPS。
         _bid = bc.current_batch_id() if bc is not None else None
-        if _bid and _LAST_PACK_ZIP:
+        if _bid and (_LAST_PACK_ZIP or _LAST_PACK_ZIPS):
             _bst = "done" if _zip_ok else "incomplete"
             if bc.set_batch_status(_bid, _bst, note="" if _zip_ok else "未生成最终 zip"):
                 print(f">>> [batch] 批次 {_bid} 状态 -> {_bst}")

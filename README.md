@@ -25,6 +25,24 @@ pipeline.db 备份统一格式：pipeline.db.bak_<用途>_<YYYYMMDD_HHMMSS>
 专题一个 <topic>.zip，run 内全部批次 step7 dst 指向同一 zip）。
 回退：GAOKZX_PACK_MODE=batch 即旧行为（每批一 zip，含 _rN 分片，pack 前自动 QC）。
 
+## 阶段 2 已完成（整专题合并单包）
+
+commit `8f2ce58` + `b696242`。
+
+- 新增 `GAOKZX_PACK_MODE` 开关（默认 `topic`；`=batch` 回退旧行为）
+- `step_pack` 改为分派器：topic → `step_pack_topic`、batch/单文件 → `step_pack_legacy`
+- `step_pack_topic`：枚举 run 内所有批次 → 一专题一 `<topic>.zip`
+- `_batch_zips_exist` 支持 run 级回退
+- `verify_run_completeness` topic 模式按 run 级去重计数
+- `_LAST_PACK_ZIPS` 多专题全校验
+
+验证：
+- 离线单测 `test_topic_pack.py` 22/22
+- 隔离端到端 `--chunk 0` topic/batch 双模式通过
+- 联网端到端 `--chunk 24`（阶段 A）：待用户执行后回写结果
+
+回退：`GAOKZX_PACK_MODE=batch` + `git revert 8f2ce58 b696242`
+
 ## 待办（下轮独立议题）
 
 - 问题 2：打包目录化命名（zip 内按 区/学校 层级重组 + 存量迁移 step_migrate_layout）；
