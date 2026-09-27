@@ -6,6 +6,8 @@ pipeline_test.db
 *.db-journal
 *.db-wal
 *.db-shm
+# 源码开工快照（回退已由 git 基线承担，本地快照不入库）
+pipeline.py.bak_*
 
 # ---- Python 缓存 ----
 __pycache__/
