@@ -1607,6 +1607,9 @@ def step_rename(_con=None, root=None, limit=None, dry=True, use_ocr=False,
 
 # 打包（zip）—— 本轮机最近一次正式打包生成的 zip（供全流程收尾「最终 zip 是否存在」检查）
 _LAST_PACK_ZIP = None
+# 整专题打包（topic 模式）一轮可产出多个 zip：伴生列表记全部，_final_zip_check 逐个核存在性；
+# _LAST_PACK_ZIP 保留作单 zip 兼容语义（legacy 路径只产一个，只写它；topic 路径两者都写）。
+_LAST_PACK_ZIPS = []
 
 
 def _pack_mode():
@@ -1818,9 +1821,11 @@ def step_pack_topic(con=None, root=None, out=None, limit=None, dry=False, _comme
     扫描，承修 1 反截断）落在打包源目录下的成品，按专题目录分组，一专题产出一个 <topic>.zip
     （arcname 相对打包源根，保留 <专题>/…/文件 结构）。每个文件的 step=7 ok 按其原始
     (batch_id, file_id) 写入，dst 指向所属专题 zip——故 _batch_zips_exist 逐批仍可见、自动验收照常。
-    返回：产出的 zip 路径列表（无产出则 None）。"""
+    返回：产出的 zip 路径列表（无产出则 None）。
+    注：不重复触发 QC——调用方（_run_auto_impl）在流水线内 qc/ads 阶段刚跑过，打包前再跑属同轮重复；
+    菜单单独 batch 打包路径由 step_pack_legacy 承担（其 pack 前 QC 语义保留在 legacy，不动）。"""
     import zipfile
-    global _LAST_PACK_ZIP
+    global _LAST_PACK_ZIP, _LAST_PACK_ZIPS
     bid0 = _resolve_bid(batch_id)
     if bc is None or (not bid0 and not run_id):
         print(">>> [pack] 没有当前批次（_批次/current.json 不存在），无法打包。")
@@ -1926,7 +1931,8 @@ def step_pack_topic(con=None, root=None, out=None, limit=None, dry=False, _comme
         statusio.end_step("pack", status="FAIL", note="zip 未生成")
         return None
     statusio.end_step("pack", note=f"{len(made)} 个专题 zip")
-    _LAST_PACK_ZIP = made[0]
+    _LAST_PACK_ZIPS = list(made)          # 多专题全量记录（收尾逐个校验）
+    _LAST_PACK_ZIP = made[0]              # 单 zip 兼容语义：非分批收尾仍只看这一个
     _gb = sum(os.path.getsize(z) for z in made) / 1024**3
     print(f">>> [pack] 整专题打包完成：{len(made)} 个 zip（{len(entries)} 个文件，源 {total_bytes/1024**3:.2f}GB，压缩后 {_gb:.2f}GB）")
     if n_fail:
@@ -2030,7 +2036,19 @@ def step_accept(batch_id=None, file_id=None):
 
 def _final_zip_check():
     """全流程收尾：确认最终 zip 真实存在。成功 -> 返回非空 zip 路径字符串（truthy）；
-    失败 -> 提示"全流程未真正完成"并返回 None（绝不返回空串，调用方 bool()/not 判定安全）。"""
+    失败 -> 提示"全流程未真正完成"并返回 None（绝不返回空串，调用方 bool()/not 判定安全）。
+    topic 整专题打包一轮可产出多个 zip（_LAST_PACK_ZIPS），逐个校验存在性，缺一即判失败。"""
+    if _LAST_PACK_ZIPS:
+        _missing = [z for z in _LAST_PACK_ZIPS if not Path(z).exists()]
+        if _missing:
+            print(f">>> [check] 全流程未真正完成：本轮机 {len(_LAST_PACK_ZIPS)} 个专题 zip 中 "
+                  f"{len(_missing)} 个缺失：")
+            for _m in _missing: print(f"      - {_m}")
+            return None
+        try: _szs = sum(Path(z).stat().st_size for z in _LAST_PACK_ZIPS) / 1024**3
+        except OSError: _szs = 0
+        print(f">>> [check] 本轮机 {len(_LAST_PACK_ZIPS)} 个专题 zip 均已确认存在（合计 {_szs:.2f}GB）")
+        return _LAST_PACK_ZIPS[0]
     p = _LAST_PACK_ZIP
     if p and Path(p).exists():
         try: sz = Path(p).stat().st_size / 1024**3
@@ -5573,8 +5591,9 @@ def _run_auto_impl(args):
     接力跑阶段 2~7（pack 按轮增量打包、zip 名带 _rN），下载器空结果即结束；--chunk 0 = 旧行为（全量下载后统一跑）。
     下载游标按"URL"隔离断点续跑（换 URL 不继承旧 URL 的 offset）。退出码：0=打包成功或本批无新 PDF（正常空转）；
     1=阶段失败；2=参数不满足。未捕获崩溃会写完整 traceback 到 logs/auto_crash_*.log。"""
-    global AUTO_MODE, ONLY_FILE_IDS, FORCE_MISSING, _LAST_PACK_ZIP
+    global AUTO_MODE, ONLY_FILE_IDS, FORCE_MISSING, _LAST_PACK_ZIP, _LAST_PACK_ZIPS
     _LAST_PACK_ZIP = None          # 修「假成功」前置：重置本次产出标志，杜绝跨运行残留导致误判"已产出/已验收"
+    _LAST_PACK_ZIPS = []           # 同上：topic 多 zip 伴生列表一并重置
     _run_bids = []                 # 本次运行创建的各轮 batch_id（收尾统一标待验收）；函数开头初始化，保证各 start 路径均有定义
     install_auto_crash_hook()      # 任何逃逸到顶层的崩溃都先落盘 traceback（闪退专项：绝不"无日志闪退"）
     raw_stage = getattr(args, "start_stage", None)

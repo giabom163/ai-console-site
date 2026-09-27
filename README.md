@@ -10,3 +10,22 @@ pipeline.db 备份统一格式：pipeline.db.bak_<用途>_<YYYYMMDD_HHMMSS>
   pipeline.db.bak_offsetfix_20260926_225524
   pipeline.db.bak_cleanfix_20260927_103015
 用途标识：offsetfix / cleanfix / migration / packmerge / layout ...
+
+## 最简全流程测试
+
+命令（--batch-id 换成本地任一存在的历史批次）：
+  python pipeline.py --auto --start-stage pack --batch-id <bid> \
+    --test-root D:\work\_test_min --chunk 0
+
+前置：_test_min 内需有 pipeline.db 副本、_批次\（manifest）与打包源阶段目录的对应专题子目录
+（resolve 按四阶段根找文件，缺一阶段则该文件不入包）。
+
+用途：不联网、不跑 OCR、GPU 零占用，分钟级验证整专题打包链路（pack -> accept）。
+核心语义：GAOKZX_PACK_MODE=topic（默认）下中段续跑单批就地打包也按 run 合并（一个
+专题一个 <topic>.zip，run 内全部批次 step7 dst 指向同一 zip）。
+回退：GAOKZX_PACK_MODE=batch 即旧行为（每批一 zip，含 _rN 分片，pack 前自动 QC）。
+
+## 待办（下轮独立议题）
+
+- 问题 2：打包目录化命名（zip 内按 区/学校 层级重组 + 存量迁移 step_migrate_layout）；
+  当前 topic zip 内保持打包源现有层级（<专题>/<子目录>/<文件>，即扁平命名现状）。
