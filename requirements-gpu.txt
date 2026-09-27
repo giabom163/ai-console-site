@@ -1,0 +1,32 @@
+# GPU 版依赖（NVIDIA 显卡机器）：paddlepaddle-gpu（官方 cu126 源）+ CUDA/cuDNN 运行库 + 基础依赖
+#
+# 用法（项目 venv，一条命令装齐）：
+#   C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Scripts\python.exe -m pip install -r requirements-gpu.txt
+#
+# [!] 若此前装过 CPU 版，先卸载（两包互斥，同名 paddle 目录会互相覆盖）：
+#   ...\Scripts\python.exe -m pip uninstall -y paddlepaddle
+#
+# 验证（应输出 gpu:0 且 device_count>=1）：
+#   ...\Scripts\python.exe -c "import paddle; print(paddle.device.get_device(), paddle.device.cuda.device_count())"
+#
+# 驱动要求：NVIDIA 驱动 >= 525（CUDA 12.x）。本机 RTX 4060 Laptop / 驱动 616.64 满足。
+#
+# [关键] paddlepaddle-gpu 的 win 轮子【不带】CUDA/cuDNN DLL（历史上报
+#        “cudnn64_9.dll … error code 126” 的根因），必须装下面这组 nvidia-* pip 包提供；
+#        BatchOcrPdfAddTextLayer.py 启动时会自动把 site-packages\nvidia\*\bin 注入
+#        DLL 搜索路径，无需手工拷贝 DLL 或装 CUDA Toolkit。
+#        （paddlepaddle-gpu 元数据声明的精确版本为 cublas==12.6.4.1 / cudart==12.6.77 /
+#         cudnn==9.5.1.17 / cufft==11.3.0.4 / curand==10.3.7.77 / cusolver==11.7.1.2 /
+#         cusparse==12.5.4.2；实测 12.9/9.26 系更新版本亦可用，若报 DLL 错再按精确版本降级）
+
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+paddlepaddle-gpu==3.2.0
+nvidia-cuda-runtime-cu12
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+nvidia-cufft-cu12
+nvidia-curand-cu12
+nvidia-cusolver-cu12
+nvidia-cusparse-cu12
+
+-r requirements.txt

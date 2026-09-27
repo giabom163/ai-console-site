@@ -1,0 +1,26 @@
+# ---- 数据库与备份（体积大 / 运行态，不纳入版本控制）----
+pipeline.db
+pipeline.db.bak_*
+pipeline_test.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ---- 运行产物 / 临时目录 ----
+.ocr_tmp/
+logs/
+reports/
+.ocr_benchlog_*.txt
+
+# ---- 工具/IDE 私有目录 ----
+.workbuddy/
+
+# ---- 测试隔离根（端到端验证临时产物）----
+_test_prune/
+_test_pack/

@@ -1,0 +1,15 @@
+# CPU 版依赖（无 NVIDIA 显卡机器）：paddlepaddle（CPU）+ 基础依赖
+#
+# 用法（项目 venv，一条命令装齐）：
+#   C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Scripts\python.exe -m pip install -r requirements-cpu.txt
+#
+# [!] 若此前装过 GPU 版，先卸载（两包互斥，同名 paddle 目录会互相覆盖）：
+#   ...\Scripts\python.exe -m pip uninstall -y paddlepaddle-gpu
+#
+# CPU 模式运行时（BatchOcrPdfAddTextLayer 已自动钉死）：
+#   OMP_NUM_THREADS=1  MKL_NUM_THREADS=1  OPENBLAS_NUM_THREADS=1  cpu_threads=1
+#   worker 数 = 物理核数（非逻辑线程），禁止 4×4 线程超订。
+
+paddlepaddle==3.2.0
+
+-r requirements.txt
