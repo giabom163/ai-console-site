@@ -1608,7 +1608,36 @@ def step_rename(_con=None, root=None, limit=None, dry=True, use_ocr=False,
 # 打包（zip）—— 本轮机最近一次正式打包生成的 zip（供全流程收尾「最终 zip 是否存在」检查）
 _LAST_PACK_ZIP = None
 
-def step_pack(con=None, root=None, out=None, limit=None, dry=False, _comment="",
+
+def _pack_mode():
+    """打包模型开关（读环境变量，运行时可切换，无需重载模块）：
+    GAOKZX_PACK_MODE = "topic"（默认）：整 run 合并，一个专题一个 <topic>.zip；
+                     "batch"：旧行为，每批一个 zip（含 _rN 分片），完全等同 step_pack_legacy。"""
+    return (os.environ.get("GAOKZX_PACK_MODE") or "topic").strip().lower()
+
+
+def pack_folder(folder, dst_zip, arcbase=None, compresslevel=6):
+    """把目录 folder 递归压缩成单个 dst_zip（os.walk 全量，仅收真实存在的文件、跳过 dst 自身），
+    arcname 相对 arcbase（默认=folder，zip 根即 folder 内容）。返回 (写入文件数, dst_zip)。
+    注：run 级合并打包（step_pack_topic）刻意不用本函数做全目录扫描，而按 manifest file_id 枚举
+    + resolve_file_path 权威定位（承修 1 反截断，禁全目录扫描）；本函数保留作通用/手工整目录压包之用。"""
+    import zipfile
+    folder = Path(folder)
+    base = Path(arcbase) if arcbase else folder
+    dst_abs = os.path.abspath(str(dst_zip))
+    n = 0
+    with zipfile.ZipFile(dst_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=compresslevel) as zf:
+        for _root, _dirs, _files in os.walk(folder):
+            for fn in _files:
+                fp = os.path.join(_root, fn)
+                if os.path.abspath(fp) == dst_abs:
+                    continue
+                zf.write(fp, os.path.relpath(fp, str(base)))
+                n += 1
+    return n, str(dst_zip)
+
+
+def step_pack_legacy(con=None, root=None, out=None, limit=None, dry=False, _comment="",
               batch_id=None, ask_apply=True, skip_wm=False,
               tag="", only_unpacked=False):
     """第 7 步：打包 zip（STEP_PACK=7）。源默认「已清广告」（STAGE_ADS）；仅 skip_wm=True（步骤 6 未跑/被放弃）
@@ -1767,6 +1796,143 @@ def step_pack(con=None, root=None, out=None, limit=None, dry=False, _comment="",
         statusio.end_step("pack", note=f"zip: {zip_path.name}（{sz:.2f}GB）")
         _LAST_PACK_ZIP = str(zip_path)
         return str(zip_path)
+
+
+# ---------------------- 整专题合并打包（问题 3，GAOKZX_PACK_MODE=topic） ----------------------
+def step_pack(con=None, root=None, out=None, limit=None, dry=False, _comment="",
+              batch_id=None, ask_apply=True, skip_wm=False,
+              tag="", only_unpacked=False, run_id=None):
+    """第 7 步打包（分派器）。GAOKZX_PACK_MODE=topic（默认）：整 run 合并，一专题一 zip（step_pack_topic）；
+    =batch：旧行为（每批一 zip，含 _rN 分片），完全走 step_pack_legacy。
+    单文件调度（ONLY_FILE_IDS）恒走 legacy 小包，不受开关影响。tag/only_unpacked 仅 legacy 有意义。"""
+    if _pack_mode() != "topic" or ONLY_FILE_IDS:
+        return step_pack_legacy(con, root, out, limit, dry, _comment, batch_id,
+                                ask_apply, skip_wm, tag, only_unpacked)
+    return step_pack_topic(con, root, out, limit, dry, _comment, batch_id,
+                           ask_apply, skip_wm, run_id=run_id)
+
+
+def step_pack_topic(con=None, root=None, out=None, limit=None, dry=False, _comment="",
+                    batch_id=None, ask_apply=True, skip_wm=False, run_id=None):
+    """整 run 合并打包：把同一次运行(run_id)下所有批次、经 resolve_file_path 权威定位（禁全目录
+    扫描，承修 1 反截断）落在打包源目录下的成品，按专题目录分组，一专题产出一个 <topic>.zip
+    （arcname 相对打包源根，保留 <专题>/…/文件 结构）。每个文件的 step=7 ok 按其原始
+    (batch_id, file_id) 写入，dst 指向所属专题 zip——故 _batch_zips_exist 逐批仍可见、自动验收照常。
+    返回：产出的 zip 路径列表（无产出则 None）。"""
+    import zipfile
+    global _LAST_PACK_ZIP
+    bid0 = _resolve_bid(batch_id)
+    if bc is None or (not bid0 and not run_id):
+        print(">>> [pack] 没有当前批次（_批次/current.json 不存在），无法打包。")
+        return None
+    # ---- 打包源决策（与 legacy 同语义）：默认「已清广告」；skip_wm 才回退「去水印后」 ----
+    if root:
+        src_root = Path(root)
+        if bc.norm_key(src_root) == bc.norm_key(STAGE_CLEANED) and not skip_wm:
+            print(">>> [pack] [!] 警告：打包源是「去水印后」而非默认的「已清广告」——zip 可能含广告页！")
+    elif skip_wm:
+        src_root = STAGE_CLEANED
+        print(">>> [pack] [!] 已明确跳过隐形水印清理（步骤6），打包源回退为「去水印后」，zip 中可能保留底边广告页。")
+    else:
+        src_root = STAGE_ADS
+    if not src_root.is_dir():
+        print(f">>> [pack] 打包源目录不存在：{src_root}")
+        return None
+    # ---- run 归属：显式 run_id 优先，否则由批次回推；仍无则退化为单批 ----
+    run_id = run_id or (bc.db_run_of_batch(bid0) if bid0 else None)
+    if run_id:
+        bids = [b for b in (bc.db_batches_of_run(run_id) or []) if b]
+    else:
+        bids = [bid0] if bid0 else []
+    if not bids:
+        print(">>> [pack] 未找到可打包的批次。")
+        return None
+    # ---- 逐批枚举 manifest file_id + resolve 权威路径（禁全目录扫描，承修 1） ----
+    _src_key = bc.norm_key(src_root)
+    entries, _seen = [], set()          # (bid, fid, path)
+    for b in bids:
+        mf = bc.load_manifest(b) or {}
+        for _rec in mf.get("files", []):
+            _fid = _rec.get("file_id")
+            if not _fid:
+                continue
+            _pm = str(_rec.get("path") or "")
+            _chosen = None
+            if _pm and os.path.isfile(_pm) and bc.norm_key(_pm).startswith(_src_key + os.sep):
+                _chosen = os.path.abspath(_pm)          # manifest.path 权威且在本阶段 -> 精确采用
+            else:
+                _pr = bc.resolve_file_path(b, _fid)     # 找回被回退/挪动的实际成品
+                if _pr and bc.norm_key(_pr).startswith(_src_key + os.sep):
+                    _chosen = _pr
+            if not _chosen or _chosen in _seen or bc.is_test_path(_chosen):
+                continue
+            _seen.add(_chosen)
+            entries.append((b, _fid, _chosen))
+    if limit:
+        entries = entries[:limit]
+    if not entries:
+        print(f">>> [pack] 本次运行在「{src_root.name}」没有可打包的成品（run={run_id or bid0}）。")
+        return None
+    # ---- 按专题分组：arcname 相对 src_root，顶层目录名即专题；仅一层（无子目录）归入 "_散件" ----
+    groups = {}                          # topic -> [(bid, fid, path, arc)]
+    for b, fid, p in entries:
+        arc = os.path.relpath(p, str(src_root))
+        _parts = Path(arc).parts
+        topic = _parts[0] if len(_parts) > 1 else "_散件"
+        groups.setdefault(topic, []).append((b, fid, p, arc))
+    dst_dir = Path(out) if out else STAGE_PACKED
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    # ---- dry-run 预览：不生成 zip，不写 file_steps ----
+    if dry:
+        print(">>> [pack] (dry-run) 整专题打包预览：")
+        for _t, _it in groups.items():
+            print(f"        {_t}.zip  <- {len(_it)} 个 PDF")
+        if not ask_apply or not _ask_apply("整专题打包 zip"):
+            print(">>> [pack] 仅预览，未正式执行（pipeline.db 不写 ok）。")
+            return None
+        dry = False
+    statusio.begin_step("pack", total=len(entries), out_dir=str(dst_dir),
+                        note=f"{len(groups)} 个专题 zip")
+    made, total_bytes, n_fail = [], 0, 0
+    for topic, items in groups.items():
+        zip_path = dst_dir / f"{topic}.zip"
+        print(f">>> [pack] 整专题打包：{topic}（{len(items)} 个 PDF）-> {zip_path}")
+        with _wf_bar(len(items), "打包", enabled=True) as b:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+                for bid, fid, p, arc in items:
+                    _bstep(bid, fid, STEP_PACK, "started", src=p)
+                    try:
+                        zf.write(p, arc)
+                        total_bytes += os.path.getsize(p)
+                        b.update(1, label=os.path.basename(p)[:38])
+                        try: _sz = os.path.getsize(p)
+                        except OSError: _sz = None
+                        _bstep(bid, fid, STEP_PACK, "ok", src=p, dst=str(zip_path), src_sha=_sha256_file(p))
+                        _bstep(bid, fid, STEP_ACCEPT, bc.ST_PENDING_ACCEPT, src=p, dst=str(zip_path))
+                        ledgerio.log("pack", "DONE", src_path=p, dst_path=str(zip_path),
+                                     size_bytes=_sz, note=f"包内: {arc}")
+                        statusio.update_detail("pack", p, os.path.basename(p), "DONE", src_bytes=_sz, note=arc)
+                    except OSError as e:
+                        n_fail += 1
+                        b.update(1, label=os.path.basename(p)[:38], ok=False, name=os.path.basename(p))
+                        log_err(os.path.basename(p), str(e))
+                        _bstep(bid, fid, STEP_PACK, "fail", src=p, dst=str(zip_path), error=str(e)[:160])
+                        ledgerio.log("pack", "FAIL", src_path=p, dst_path=str(zip_path), note=str(e)[:160])
+                        statusio.update_detail("pack", p, os.path.basename(p), "FAIL", note=str(e)[:160])
+        if zip_path.exists():
+            made.append(str(zip_path))
+    if not made:
+        print(">>> [pack] 打包失败：未生成任何 zip")
+        statusio.end_step("pack", status="FAIL", note="zip 未生成")
+        return None
+    statusio.end_step("pack", note=f"{len(made)} 个专题 zip")
+    _LAST_PACK_ZIP = made[0]
+    _gb = sum(os.path.getsize(z) for z in made) / 1024**3
+    print(f">>> [pack] 整专题打包完成：{len(made)} 个 zip（{len(entries)} 个文件，源 {total_bytes/1024**3:.2f}GB，压缩后 {_gb:.2f}GB）")
+    if n_fail:
+        print(f">>> [pack] [!] {n_fail} 个文件入包失败（详上），zip 可能不完整。")
+    return made
+
 
 # ---------------------- 验收归档（看板 [验收通过]） ----------------------
 def _stage_root_of(path):
@@ -3588,24 +3754,48 @@ def has_targets(batch_id):
 
 def _batch_zips_exist(batch_id):
     """返回本批次 step=7(打包) 状态 ok 且物理文件真实存在的 zip 路径列表（自动验收前确认 zip 已生成）。
+    批次级无记录时回退查同 run_id 下任一兄弟批次的 step=7 ok zip（批次级存在性降级为 run 级）：
+    配合问题 3 整专题合并包——即使中间批次自身未写 step=7，只要同一 run 已整专题打包，各批仍判“有 zip”。
     查不到 / 无记录 / 文件已不在 -> 空列表（调用方据此跳过 accept，绝不对“没有 zip 的批次”验收）。"""
-    zips = []
     if bc is None or not batch_id:
-        return zips
-    try:
-        _zc = sqlite3.connect(str(DB))
+        return []
+
+    def _q(bids):
+        out = []
+        bids = [b for b in bids if b]
+        if not bids:
+            return out
         try:
-            rows = _zc.execute(
-                "SELECT DISTINCT dst FROM file_steps WHERE batch_id=? AND step=? "
-                "AND status='ok' AND dst LIKE '%.zip'", (batch_id, STEP_PACK)).fetchall()
-        finally:
-            _zc.close()
-        for _r in rows:
-            _z = _r[0] if _r else None
-            if _z and os.path.isfile(str(_z)):
-                zips.append(str(_z))
-    except sqlite3.Error:
-        pass
+            _zc = sqlite3.connect(str(DB))
+            try:
+                _ph = ",".join("?" * len(bids))
+                rows = _zc.execute(
+                    f"SELECT DISTINCT dst FROM file_steps WHERE batch_id IN ({_ph}) AND step=? "
+                    "AND status='ok' AND dst LIKE '%.zip'", (*bids, STEP_PACK)).fetchall()
+            finally:
+                _zc.close()
+            for _r in rows:
+                _z = _r[0] if _r else None
+                if _z and os.path.isfile(str(_z)) and _z not in out:
+                    out.append(str(_z))
+        except sqlite3.Error:
+            pass
+        return out
+
+    zips = _q([batch_id])
+    if zips:
+        return zips
+    # run 级回退
+    try:
+        _run_id = bc.db_run_of_batch(batch_id)
+    except Exception:
+        _run_id = None
+    if _run_id:
+        try:
+            _sib = [b for b in (bc.db_batches_of_run(_run_id) or []) if b and b != batch_id]
+        except Exception:
+            _sib = []
+        zips = _q(_sib)
     return zips
 
 
@@ -5263,6 +5453,11 @@ def _run_auto_stage(con, stage, bid, force, wm_workers=6, ocr_workers=None, ocr_
             return 3
         if rc not in (0, None): return rc or 1
     elif stage == "pack":
+        # 分批流水线 + topic：中间轮不单独出包（避一专题碎成 N 个 zip）；打包延后到 run 末统一进行。
+        # only_unpacked=True 仅分批轮次会传（单轮/中段续跑为 False，照常就地打包）。
+        if _pack_mode() == "topic" and only_unpacked:
+            print(">>> [pack] 分批流水线(topic)：本批不单独出包，延后到本次运行结束按专题统一打包。")
+            return None
         zip_p = step_pack(con, None, None, dry=False, batch_id=bid,
                           tag=tag, only_unpacked=only_unpacked)
         if zip_p == "ALREADY":
@@ -5275,7 +5470,7 @@ def verify_run_completeness(run_id, url_ident):
     """机制1（--force-full-run 才调用）："跑不完不许结束"的完整性断言。纯只读校验，绝不改库/改状态。
     核验三件事，任一不满足即 ok=False（调用方据此拒绝自动验收、保留 pending_accept、退出码 1）：
       1) run 下每个批次：本轮"下载成功(step1=ok)"的文件都到达验收步(step8 ∈ {pending_accept, accepted, skip})；
-      2) 每个批次最终 zip 内的 PDF 数 == 该批 step8 终态(待验收+已验收)数；
+      2) zip 内 PDF 数 == 待/已验收数（batch 模式逐批；topic 模式整 run 合并为少数专题 zip，改按 run 去重 zip 内 PDF 总数 == 各批终态之和）；
       3) 该下载 URL 的续跑游标 discover_cursor == total_target（专题确已遍历完）。
     返回 (ok, reasons)。无台账后端(bc=None)时返回 (True, []) —— 无从校验则保持旧行为、绝不误伤。
     reasons 汇总全部可判定信号（如 cursor=24 < total=46），供人工介入定位。"""
@@ -5288,6 +5483,9 @@ def verify_run_completeness(run_id, url_ident):
             bids = list(bc.db_batches_of_run(run_id) or [])
         except Exception:
             bids = []
+    _topic = _pack_mode() == "topic"
+    import zipfile as _zip
+    _sum_term = 0
     for _b in bids:
         try:
             cnt = bc.db_step_counts(_b) or {}
@@ -5302,20 +5500,41 @@ def verify_run_completeness(run_id, url_ident):
         _reached = _term + _sk
         if _dl and _reached < _dl:
             reasons.append(f"batch {_b}: 下载成功 {_dl} 个，仅 {_reached} 个到达验收步(step8)——有文件卡在打包/验收前")
-        zips = _batch_zips_exist(_b)
-        if zips and _term:
-            import zipfile as _zip
+        _sum_term += _term
+        if not _topic:
+            # batch 模式：逐批 zip 内 PDF 数 == 该批待/已验收数
+            zips = _batch_zips_exist(_b)
+            if zips and _term:
+                _zn, _zok = 0, True
+                for _z in zips:
+                    try:
+                        with _zip.ZipFile(_z) as _zf:
+                            _zn += sum(1 for n in _zf.namelist() if n.lower().endswith('.pdf'))
+                    except Exception:
+                        _zok = False
+                        reasons.append(f"batch {_b}: 无法读取 zip 校验文件数（{_z}）")
+                        break
+                if _zok and _zn != _term:
+                    reasons.append(f"batch {_b}: zip 内 PDF {_zn} 个 != 待/已验收 {_term} 个")
+    if _topic and bids and _sum_term:
+        # topic 模式：整 run 合并成少数专题 zip，逐批计数无意义 -> run 级：去重 zip 内 PDF 总数 == 各批待/已验收之和
+        _rz = []
+        for _b in bids:
+            for _z in _batch_zips_exist(_b):
+                if _z not in _rz:
+                    _rz.append(_z)
+        if _rz:
             _zn, _zok = 0, True
-            for _z in zips:
+            for _z in _rz:
                 try:
                     with _zip.ZipFile(_z) as _zf:
                         _zn += sum(1 for n in _zf.namelist() if n.lower().endswith('.pdf'))
                 except Exception:
                     _zok = False
-                    reasons.append(f"batch {_b}: 无法读取 zip 校验文件数（{_z}）")
+                    reasons.append(f"run {run_id}: 无法读取 zip 校验文件数（{_z}）")
                     break
-            if _zok and _zn != _term:
-                reasons.append(f"batch {_b}: zip 内 PDF {_zn} 个 != 待/已验收 {_term} 个")
+            if _zok and _zn != _sum_term:
+                reasons.append(f"run {run_id}: 专题包内 PDF 共 {_zn} 个 != 各批待/已验收之和 {_sum_term}")
     if url_ident:
         try:
             _rid, _cur, _tot, _fp = bc.db_url_cursor(url_ident)
@@ -5734,6 +5953,18 @@ def _run_auto_impl(args):
             try: _rc = _run_stages_auto(con, bid, 0)
             finally: con.close()
             if _rc is not None:
+                return 1
+        # ---- 分批 + topic：各轮 wm..ads 已在下载循环内逐批跑完、打包已延后；此处按 run 统一整专题打包一次 ----
+        #      （dry 仅预览；_staged_multi=False 时已在上面就地打包，不重复）。----
+        if _staged_multi and _pack_mode() == "topic":
+            _con = db()
+            try:
+                _rp = step_pack(_con, None, None, dry=dry, run_id=_run_id)
+            finally:
+                try: _con.close()
+                except Exception: pass
+            if not dry and _new_total > 0 and not _rp:
+                print(">>> [auto] [!] 整专题打包未产出 zip。")
                 return 1
         if dry:
             print("\n>>> [auto] (dry-run) 以上为将执行的阶段，未实际改动。")
