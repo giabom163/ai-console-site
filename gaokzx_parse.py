@@ -375,6 +375,89 @@ def abs_url(href, base="https://www.gaokzx.com"):
     return href
 
 
+# --------------------------------------------------------------------------
+# 试卷类型筛选（可选功能）：以下四个函数仅供 --paper-type 过滤链路调用。
+# 纯函数、无全局副作用；不被调用时本模块行为与改前逐语句一致（parse_topic /
+# extract_files 等一概未动）。156286 页实测：统考表用「试卷类型」独立列（北京卷/
+# 全国I卷…，落在 group[-1]），分省表用省份名链接（北京/天津（回忆版）…，落在 text），
+# 两种版式互斥，故匹配标签要按 text 是否为导航词决定取 text 还是 group[-1]。
+# --------------------------------------------------------------------------
+# 罗马数字（U+2160~U+2163）-> 拉丁等价：表格单元格实测用拉丁 I/II，正文说明块混用
+# U+2161(Ⅱ)，两侧归一后互为子串才能互相命中。
+_ROMAN_MAP = str.maketrans({"\u2160": "I", "\u2161": "II", "\u2162": "III", "\u2163": "IV"})
+
+# 导航词（归一化后）：表格里「试题|答案」这类链接列文字，本身不携带试卷类型信息，
+# 命中它们时应改看左邻单元格（group[-1]）取真正的类型标签。
+_NAV_LABELS = {"试题", "答案", "试题|答案", "解析", "下载", "查看"}
+
+# 候选黑名单（归一化后）：表头列名，不作为「试卷类型」候选展示。
+_HEADER_NOISE = {"科目", "试卷类型"}
+
+
+def paper_type_key(s):
+    """把一段文本归一化成「试卷类型匹配键」：去所有空白 → 罗马数字 Ⅰ/Ⅱ/Ⅲ/Ⅳ 转拉丁
+    → 全角字母/数字转半角 → casefold。非字符串输入返回 ""。"""
+    if not isinstance(s, str):
+        return ""
+    t = re.sub(r"\s+", "", s).translate(_ROMAN_MAP)
+    # 全角字母数字（U+FF10-19 / FF21-3A / FF41-5A）→ 半角：码位减 0xFEE0；
+    # 全角括号「（）」(U+FF08) 等不在这些区间内，原样保留，不受影响。
+    out = []
+    for ch in t:
+        o = ord(ch)
+        if 0xFF10 <= o <= 0xFF19 or 0xFF21 <= o <= 0xFF3A or 0xFF41 <= o <= 0xFF5A:
+            out.append(chr(o - 0xFEE0))
+        else:
+            out.append(ch)
+    return "".join(out).casefold()
+
+
+def is_nav_label(s):
+    """判断文本（自动归一化后）是否为导航词（试题/答案/解析…），即不携带试卷类型信息。"""
+    return paper_type_key(s) in _NAV_LABELS
+
+
+def record_matches(rec, terms):
+    """判断一条 parse_topic 记录是否命中给定试卷类型关键词集合。
+
+    terms：已归一化关键词集合（set/list）；空集合恒 False（是否启用由调用方决定）。
+    取标签规则（兼容两种表格版式，避免分省表「北京」进入同行天津记录 group 致误伤）：
+      - text 非导航词（分省表的「北京」「天津（回忆版）」）→ 直接用 text 作标签；
+      - text 是导航词（统考表的「试题|答案」）→ 类型在左邻单元格 group[-1]（「北京卷」「全国I卷」）。
+    命中 = 任一非空 term 是标签归一文本的子串。"""
+    text = rec.get("text") or ""
+    if is_nav_label(text):
+        group = rec.get("group") or []
+        label = group[-1] if group else ""
+    else:
+        label = text
+    key = paper_type_key(label)
+    return any(term and term in key for term in terms)
+
+
+def collect_paper_candidates(recs):
+    """从 parse_topic 记录里抽取「试卷类型」候选（供交互自选，返回原文、不归一化）。
+
+    只认统考版式：text 为导航词（试题|答案）的记录，其 group[-1] 才是类型标签
+    （北京卷/天津卷/上海卷/全国I卷/全国II卷…）。分省表的省份名不进候选（避免刷屏），
+    改由调用方的别名规则（如 北京卷->北京）顺带命中。去重保序、剔空、剔表头/导航噪声。"""
+    out = []
+    seen = set()
+    for rec in recs or []:
+        if not is_nav_label(rec.get("text") or ""):
+            continue
+        group = rec.get("group") or []
+        if not group:
+            continue
+        cand = group[-1]
+        key = paper_type_key(cand)
+        if not key or key in seen or key in _HEADER_NOISE or key in _NAV_LABELS:
+            continue
+        seen.add(key)
+        out.append(cand)
+    return out
+
+
 if __name__ == "__main__":
     import sys
     f = sys.argv[1] if len(sys.argv) > 1 else "d1.html"
