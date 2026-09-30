@@ -620,7 +620,15 @@ def run(topic_keys, limit=0, dry_run=False, verbose=False, debug=False,
                         s["url"] = abs_url(s["url"])
                         if not s.get("section"):
                             s["section"] = clean_site_title(rec.get("detail_title") or "")
-                    next_frontier.extend(rec["drill_out"])
+                    # 下钻子层与首层同构（parse_topic 记录：text/group/url...），
+                    # 复用 run 局部 paper_terms 过滤；默认 [] 短路，等价于原 extend 全量。
+                    if paper_terms:
+                        _before = len(rec["drill_out"])
+                        _subs = [s for s in rec["drill_out"] if record_matches(s, paper_terms)]
+                        LOG(f"    [试卷类型] 下钻过滤 {paper_terms}: {_before} -> {len(_subs)}")
+                    else:
+                        _subs = rec["drill_out"]
+                    next_frontier.extend(_subs)
                 else:
                     resolved.append((rec, []))   # 真无附件，清单里体现
                 if done % 20 == 0 or done == len(frontier):
