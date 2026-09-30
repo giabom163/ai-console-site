@@ -59,7 +59,8 @@ from openpyxl.utils import get_column_letter
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from gaokzx_parse import abs_url, detail_title, extract_files, parse_topic
+from gaokzx_parse import (abs_url, detail_title, extract_files, paper_type_key,
+                          parse_topic, record_matches)
 
 # 批次核心（D:\work\gaokzx\batchcore.py）——同目录，直接 import；
 # 负责批次 manifest 与 file_steps 状态表（下载步骤的 started/ok/skip/fail 落库）。
@@ -190,6 +191,49 @@ def ctx_prefix(rec):
 # ---------------------------------------------------------------------------
 # 抓取层
 # ---------------------------------------------------------------------------
+# 试卷类型别名表：键=归一后主名，值=归一后别名元组。
+# 语义：用户输入命中键时，词表额外并入这些别名（子串匹配，故"北京"能命中
+# "北京卷/北京各区"等；反之输入别名也能命中主名记录）。
+_PAPER_TYPE_ALIASES = {
+    # 反例警示：不要加 "全国I卷": ("全国I",) —— "全国I" 是 "全国II" 的子串，
+    # 去卷别名会串味（第 1 步实测）。
+    "北京卷": ("北京",),
+    # 后续按站点实际"试卷类型"列取值扩展，如：
+    # "全国甲卷": ("甲卷",),
+    # "新高考I卷": ("新高考1卷",),
+}
+
+
+def _build_paper_terms(paper_type):
+    """把 --paper-type 原始输入转成「归一化子串词表」（含别名展开）。
+
+    - None/空串/全空白 -> 返回 []（调用方据此判定"不筛选"，非"全不匹配"）
+    - 支持多值分隔：英文/中文逗号、顿号、斜杠、空白
+    - 每个 term 过 paper_type_key 归一（去空白/罗马转拉丁/全角转半角/casefold），
+      与 record_matches 内部归一保持一致；空归一结果丢弃；去重保序
+    """
+    if not paper_type:
+        return []
+    if isinstance(paper_type, str):
+        parts = [p for p in re.split(r"[,，、/\s]+", paper_type) if p]
+    else:
+        parts = [str(p) for p in paper_type]
+    terms, seen = [], set()
+
+    def _add(x):
+        k = paper_type_key(x)
+        if k and k not in seen:
+            seen.add(k)
+            terms.append(k)
+
+    for p in parts:
+        _add(p)
+        for key in (p, paper_type_key(p)):          # 原键 + 归一键双查，容错
+            for alias in _PAPER_TYPE_ALIASES.get(key, ()):
+                _add(alias)
+    return terms
+
+
 def fetch(session, url, verbose=False, expect_binary=False, timeout=40):
     t0 = time.time()
     r = session.get(url, timeout=timeout)
@@ -209,7 +253,7 @@ def fetch(session, url, verbose=False, expect_binary=False, timeout=40):
         return r.content.decode("gbk", "replace")
 
 
-def collect_targets(session, topic_key, verbose=False, cfg=None):
+def collect_targets(session, topic_key, verbose=False, cfg=None, paper_terms=None):
     """抓专题页 -> 解析表格 -> 目标详情页列表。
 
     cfg 非空时直接用它（--url 自定义专题），否则从 TOPICS[topic_key] 取。
@@ -232,9 +276,13 @@ def collect_targets(session, topic_key, verbose=False, cfg=None):
         if files:
             LOG(f"    本页无表格，但直接含 {len(files)} 个 PDF 附件 -> 按「详情页」处理")
             title = clean_site_title(detail_title(html)) or cfg["name"]
-            return [{"section": "", "group": [], "col": "", "text": title,
-                     "url": abs_url(cfg["url"]), "row": 0, "col_idx": 0,
-                     "topic": key}]
+            rec = {"section": "", "group": [], "col": "", "text": title,
+                   "url": abs_url(cfg["url"]), "row": 0, "col_idx": 0,
+                   "topic": key}
+            if paper_terms and not record_matches(rec, paper_terms):
+                LOG(f"    [试卷类型] 详情页标题不匹配 {paper_terms} -> 跳过")
+                return []
+            return [rec]
         LOG("    [警告] 本页既无表格记录、也未发现 PDF 附件，无法推进。")
         return []
 
@@ -249,6 +297,10 @@ def collect_targets(session, topic_key, verbose=False, cfg=None):
         rec["topic"] = key
         seen[url] = rec
         targets.append(rec)
+    if paper_terms:
+        _before = len(targets)
+        targets = [t for t in targets if record_matches(t, paper_terms)]
+        LOG(f"    [试卷类型] 过滤 {paper_terms}: {_before} -> {len(targets)}")
     LOG(f"    去重后目标详情页: {len(targets)} 个")
     if verbose and targets:
         LOG("    [变量追踪] 前 3 条解析结果:")
@@ -473,12 +525,15 @@ def _apply_offset_reset(offset, total_targets, expected_fp, actual_fp):
 
 def run(topic_keys, limit=0, dry_run=False, verbose=False, debug=False,
         workers=4, delay=0.35, custom_cfgs=None, db_path=None, batch_id=None,
-        offset=0, expected_fp=None):
+        offset=0, expected_fp=None, paper_type=None):
     if ledgerio is not None and db_path:
         ledgerio.configure(db_path)     # 台账跟随调用方指定的库（压测库/生产库）
     if bc is not None and db_path:
         bc.configure(db_path)           # 批次状态表跟随同一库
     session = make_session()
+    paper_terms = _build_paper_terms(paper_type)
+    if paper_terms:
+        LOG(f"[试卷类型] paper_type={paper_type!r} -> 归一化词表 {paper_terms}")
     all_rows, all_targets = [], []
 
     # topic key -> 配置。自定义 --url 的配置与预设 TOPICS 合并，统一查询。
@@ -488,7 +543,8 @@ def run(topic_keys, limit=0, dry_run=False, verbose=False, debug=False,
 
     for tk in topic_keys:
         all_targets.extend(collect_targets(session, tk, verbose,
-                                           cfg=cfg_map.get(tk)))
+                                           cfg=cfg_map.get(tk),
+                                           paper_terms=paper_terms))
 
     # 切片前捕获目标总数（供分批流水线判定结束条件 offset>=总目标；不受 --offset/--limit 影响）。
     total_targets = len(all_targets)
@@ -746,6 +802,10 @@ def main():
     ap.add_argument("--debug", action="store_true", help="关键位置进入 pdb 断点")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--delay", type=float, default=0.35, help="每个请求基础延迟(秒)")
+    ap.add_argument("--paper-type", default=None,
+                    help="只采集指定试卷类型（如 北京卷 / 北京；可逗号分隔多值）。"
+                         "缺省=不筛选。匹配基于表格『试卷类型』列与详情页标题，"
+                         "已做罗马数字/全角/大小写归一，并做别名展开（北京卷→北京）")
     ap.add_argument("--db-path", default=None,
                     help="台账库路径（默认生产库 pipeline.db；pipeline.py 自动传）")
     ap.add_argument("--batch-id", default=None,
@@ -793,7 +853,8 @@ def main():
                             args.workers, args.delay, custom_cfgs=custom,
                             db_path=args.db_path, batch_id=bid,
                             offset=max(0, int(args.offset or 0)),
-                            expected_fp=(args.expected_fp or None))
+                            expected_fp=(args.expected_fp or None),
+                            paper_type=(args.paper_type or None))
     except KeyboardInterrupt:
         LOG("\n[中断] 用户终止")
         sys.exit(1)
