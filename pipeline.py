@@ -736,6 +736,7 @@ class SniffResult:
         self.links = []
         self.error = ""
         self.note = ""
+        self.paper_cands = []     # 供交互自选的"试卷类型"候选（collect_paper_candidates 产出；默认空）
 
 def _sniff_session():
     import requests
@@ -754,7 +755,7 @@ def _looks_like_pdf(u):
     from urllib.parse import urlparse
     return urlparse(u).path.lower().endswith(".pdf")
 
-def sniff_url(url, timeout=20, max_preview=10):
+def sniff_url(url, timeout=20, max_preview=10, paper_type=None):
     """嗅探一个 URL。永不抛异常；失败信息放进 result.error。"""
     from urllib.parse import urljoin, unquote, urlparse
     res = SniffResult(url=url)
@@ -780,8 +781,18 @@ def sniff_url(url, timeout=20, max_preview=10):
     host = urlparse(url).netloc.lower()
     if "gaokzx.com" in host:        # 已知站点：走精确解析
         try:
-            from gaokzx_parse import extract_files, parse_topic
+            from gaokzx_parse import (extract_files, parse_topic,
+                                      record_matches, collect_paper_candidates)
             recs = parse_topic(html)
+            res.paper_cands = collect_paper_candidates(recs)   # 候选列表（默认不据此过滤）
+            _flt_suffix = ""
+            if paper_type:
+                from gaokzx_download import _build_paper_terms
+                _pterms = _build_paper_terms(paper_type)
+                if _pterms:
+                    _b = len(recs)
+                    recs = [r for r in recs if record_matches(r, _pterms)]
+                    _flt_suffix = f"（试卷类型筛选：{_b} -> {len(recs)}）"
             res.title = _html_title(html)
             if recs:
                 res.kind = "gaokzx_topic"
@@ -802,6 +813,8 @@ def sniff_url(url, timeout=20, max_preview=10):
                             "页面里既无表格记录也未发现 PDF 附件；"
                             "请确认网址是专题页或详情页。")
                 res.links = [f.get("fileUrl", "") for f in files]
+            if _flt_suffix:
+                res.note = (res.note + _flt_suffix) if res.note else _flt_suffix.strip("（）")
             res.ok = True
             return res
         except Exception as e: res.error = f"站点解析失败（回退通用抓取）：{e}"
@@ -2167,7 +2180,7 @@ def _is_benign_noise(line):
 
 def step_discover_download(topic="all", limit=None, workers=6, delay=0.5,
                            url=None, name=None, dry=False, batch_id=None, offset=None,
-                           expected_fp=None):
+                           expected_fp=None, paper_type=None):
     """采集 + 下载（步骤1）。每次任务先建批次（manifest），并把 --batch-id 传给下载器；下载器
     结束时输出 RESULT{target_pages, pdf_count, downloaded} 并以退出码 2 表示空结果。返回
     (rc, result)：rc=2 表示 0 目标/0 PDF —— 调用方必须立即中止全流程。
@@ -2186,6 +2199,7 @@ def step_discover_download(topic="all", limit=None, workers=6, delay=0.5,
     if limit: cmd += ["--limit", str(limit)]
     if offset: cmd += ["--offset", str(offset)]
     if expected_fp: cmd += ["--expected-fp", str(expected_fp)]
+    if paper_type: cmd += ["--paper-type", str(paper_type)]
     if dry: cmd += ["--dry-run"]
     if bid: cmd += ["--batch-id", bid]
     cmd += ["--db-path", str(DB)]      # 台账跟随当前库（压测库/生产库）
@@ -4883,6 +4897,55 @@ def _flow_ctx(no_batch_msg, stage, empty_msg):
         return None, None
     return bid, pairs
 
+def _ask_paper_type(cands, ask=None):
+    """交互式选择试卷类型（菜单 [d] 与 auto 暂停共用）。
+
+    cands: collect_paper_candidates 产出的候选原文列表；空列表 -> 不询问直接 (None,'skip')。
+    ask:   取词函数 prompt->str|None。默认用 _ask（菜单）；auto 传入直读 stdin 的闭包，
+           在 EOF/中断时返回 None 以触发 'abort'（建批前保守中止）。
+    返回 (paper_type, action)：
+      'skip'  回车/0/3次非法 -> 不筛选，paper_type=None；
+      'set'   选中候选或自由关键词 -> paper_type 为逗号拼接字符串；
+      'abort' stdin 不可用（仅 auto）-> paper_type=None，调用方 return 1。
+    """
+    if not cands:
+        return None, "skip"
+    ask = ask or (lambda p: _ask(p))
+    for _ in range(3):
+        _hr("-")
+        print("按试卷类型筛选（可选，直接回车=不筛选抓全部）：")
+        for i, c in enumerate(cands[:30], 1):
+            print(f"  {i:2d}. {c}")
+        if len(cands) > 30:
+            print(f"  （仅显示前 30 / 共 {len(cands)} 项，可直接输入关键词）")
+        raw = ask("输入序号（可逗号多选）或关键词: ")
+        if raw is None:
+            return None, "abort"
+        raw = raw.strip()
+        if raw in ("", "0", "q"):
+            return None, "skip"
+        toks = [t for t in re.split(r"[,，、\s]+", raw) if t]
+        if toks and all(t.isdigit() for t in toks):
+            picked, bad = [], False
+            for t in toks:
+                idx = int(t)
+                if 1 <= idx <= len(cands):
+                    picked.append(cands[idx - 1])
+                else:
+                    bad = True
+            if bad:
+                print("  [!] 存在越界编号，请重输。")
+                continue
+            out = []
+            for p in picked:
+                if p not in out:
+                    out.append(p)
+            return ",".join(out), "set"
+        return raw, "set"
+    print("  未选择有效条件，按不筛选继续。")
+    return None, "skip"
+
+
 def flow_download():
     """输入网址 -> 嗅探 -> 交互决策 -> 受控执行。绝不自动全量。"""
     url = ""
@@ -4910,10 +4973,10 @@ def flow_download():
         if c == "4":
             print("已退出。")
             raise SystemExit(0)
-        if c == "1": return _download_topic_menu(None, url=url)
+        if c == "1": return _download_topic_menu(None, url=url, paper_cands=res.paper_cands)
         if c == "2":
             n = _ask_int("请输入要抓取的数量（如 10）: ", lo=1)
-            return _download_topic_menu(n, url=url)
+            return _download_topic_menu(n, url=url, paper_cands=res.paper_cands)
 
 def _decide_menu(res):
     _hr("-")
@@ -4926,16 +4989,20 @@ def _decide_menu(res):
     _hr("-")
     return _ask("请输入选项 [1/2/3/4]: ", "4", auto="1")
 
-def _download_topic_menu(limit=None, url=None):
+def _download_topic_menu(limit=None, url=None, paper_type=None, paper_cands=None):
     """专题选择菜单。传了 url 就走自定义专题页（--url），否则走预设 topic 1/2/all。"""
     if url:
         print(f"\n将使用当前网址作为自定义专题：\n  {url}")
+        if paper_cands:
+            _pt, _act = _ask_paper_type(paper_cands, ask=_ask)
+            if _act == "set":
+                paper_type = _pt
         if _ask("确认开始？[y/N]: ", "n", auto="y").lower() != "y":
             print("已取消。")
             return
         ensure_dirs(verbose=False)
         print(f"\n>>> 将以 --url 下载" f"{' limit=' + str(limit) if limit else '（全量）'} ...")
-        rc, _res = step_discover_download(limit=limit, url=url)
+        rc, _res = step_discover_download(limit=limit, url=url, paper_type=paper_type)
         return _after_download(rc, "——见上方 [SUSPICIOUS] 提示")
     print("\n选择专题：")
     print("  [1] 专题1 2025-2026北京各中学高三每月月考试题及答案")
@@ -5762,6 +5829,25 @@ def _run_auto_impl(args):
             if dry: print(f"[dry-run] 将下载：{'url=' + url if url else 'topic=' + topic}")
             else:
                 ensure_dirs(verbose=False)
+                _pt = getattr(args, "paper_type", None)
+                if url and not _pt:
+                    # 未显式 --paper-type：进入下载前暂停一次（仅问一次，结果贯穿所有轮）。
+                    # 候选取自本页表格「试卷类型」列（collect_paper_candidates）；非交互 EOF/中断 -> 保守中止 return 1
+                    # （建批次之前，不动游标/manifest/file_steps）。回车/选"不筛选" -> 与原全量路径一致。
+                    try:
+                        _cands = getattr(sniff_url(url), "paper_cands", []) or []
+                    except Exception:
+                        _cands = []
+                    if _cands:
+                        def _ask_auto(_p):
+                            try:
+                                return input(_p)
+                            except (EOFError, KeyboardInterrupt):
+                                return None
+                        _pt, _act = _ask_paper_type(_cands, ask=_ask_auto)
+                        if _act == "abort":
+                            print(">>> [auto] 已取消（建批次前中止，未动游标/批次）。")
+                            return 1
                 _dl_delay = getattr(args, "delay", 0.5)
                 if _dl_delay is None: _dl_delay = 0.5
                 _dl_workers = getattr(args, "workers", None) or 6
@@ -5814,7 +5900,7 @@ def _run_auto_impl(args):
                             f"抓取下载(第{r_idx}批)", step_discover_download, topic, per,
                             _dl_workers, _dl_delay, url=url,
                             name=getattr(args, "name", None), batch_id=_bid, offset=off,
-                            expected_fp=_pfp)
+                            expected_fp=_pfp, paper_type=_pt)
                         rc_dl = _dl[0] if isinstance(_dl, (tuple, list)) and _dl else _dl
                         _dres = _dl[1] if isinstance(_dl, (tuple, list)) and len(_dl) > 1 else None
                         # rc=3（疑似解析失效）：硬中止，绝不落入 rc==2「正常空结束」分支。
@@ -5943,7 +6029,8 @@ def _run_auto_impl(args):
                         "抓取下载", step_discover_download, topic,
                         getattr(args, "limit", None),
                         _dl_workers,
-                        _dl_delay, url=url, name=getattr(args, "name", None))
+                        _dl_delay, url=url, name=getattr(args, "name", None),
+                        paper_type=_pt)
                     rc_dl = _dl[0] if isinstance(_dl, (tuple, list)) and _dl else _dl
                     # rc=3（疑似解析失效）：硬中止，绝不落入 rc==2「正常空结束」分支。
                     if rc_dl == 3:
@@ -6215,6 +6302,9 @@ def main():
     ap.add_argument("--topic", default="all", help="下载专题：1 | 2 | all")
     ap.add_argument("--url", default=None, help="直接用专题页 URL 下载（替代 --topic）；专题目录名自动取页面 <title>，" "可用 --name 覆盖")
     ap.add_argument("--name", default=None, help="配合 --url：显式指定专题目录名")
+    ap.add_argument("--paper-type", default=None,
+                    help="按试卷类型筛选专题页表格行（如 北京卷；可逗号分隔多值）。"
+                         "不传=抓全部（旧行为不变）；透传给下载器 --paper-type")
     ap.add_argument("--limit", type=int, default=None, help="本步只处理前 N 个文件")
     ap.add_argument("--ocr-root", default=None, help=f"OCR 根目录（默认 {STAGE_CLEANED}，即给去水印成品补文字层）")
     ap.add_argument("--qc-root", default=None, help=f"质控根目录（默认 {STAGE_CLEANED}）")
@@ -6394,7 +6484,8 @@ def main():
             ensure_dirs(verbose=False)
             _dl = run_step_safe("抓取下载", step_discover_download,
                                 args.topic, args.limit, args.workers, args.delay,
-                                url=args.url, name=getattr(args, "name", None))
+                                url=args.url, name=getattr(args, "name", None),
+                                paper_type=getattr(args, "paper_type", None))
             # rc=2（0 目标/0 PDF）硬保护：立即中止，绝不继续去水印/OCR/打包空转（提示语已在 step 内打印）。
             _dl_rc = _dl[0] if isinstance(_dl, (tuple, list)) and _dl else _dl
             if _dl_rc == 2:
