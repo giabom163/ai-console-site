@@ -60,7 +60,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from gaokzx_parse import (abs_url, detail_title, extract_files, paper_type_key,
-                          parse_topic, record_matches)
+                          parse_topic, record_matches, record_matches_year)
 
 # 批次核心（D:\work\gaokzx\batchcore.py）——同目录，直接 import；
 # 负责批次 manifest 与 file_steps 状态表（下载步骤的 started/ok/skip/fail 落库）。
@@ -234,6 +234,28 @@ def _build_paper_terms(paper_type):
     return terms
 
 
+def _build_year_terms(year_type):
+    """把 --year-type 原始输入归一为去重保序的四位年份列表。
+
+    - None/空串/全空白 -> 返回 []（调用方据此判定"不筛选"，非"全不匹配"）
+    - 支持多值分隔：英文/中文逗号、顿号、空白；每段提第一个 20xx 年
+    - 与 paper 链路完全平行：默认 [] 短路，不传则行为逐语句等价。
+    """
+    if not year_type:
+        return []
+    raw = str(year_type)
+    toks = [t.strip() for t in re.split(r"[,，、\s]+", raw) if t.strip()]
+    out, seen = [], set()
+    for t in toks:
+        m = re.search(r"(20\d{2})", t)
+        if m:
+            y = m.group(1)
+            if y not in seen:
+                seen.add(y)
+                out.append(y)
+    return out
+
+
 def fetch(session, url, verbose=False, expect_binary=False, timeout=40):
     t0 = time.time()
     r = session.get(url, timeout=timeout)
@@ -253,7 +275,7 @@ def fetch(session, url, verbose=False, expect_binary=False, timeout=40):
         return r.content.decode("gbk", "replace")
 
 
-def collect_targets(session, topic_key, verbose=False, cfg=None, paper_terms=None):
+def collect_targets(session, topic_key, verbose=False, cfg=None, paper_terms=None, year_terms=None):
     """抓专题页 -> 解析表格 -> 目标详情页列表。
 
     cfg 非空时直接用它（--url 自定义专题），否则从 TOPICS[topic_key] 取。
@@ -301,6 +323,10 @@ def collect_targets(session, topic_key, verbose=False, cfg=None, paper_terms=Non
         _before = len(targets)
         targets = [t for t in targets if record_matches(t, paper_terms)]
         LOG(f"    [试卷类型] 过滤 {paper_terms}: {_before} -> {len(targets)}")
+    if year_terms:
+        _ybefore = len(targets)
+        targets = [t for t in targets if record_matches_year(t, year_terms)]
+        LOG(f"    [年份筛选] {year_terms}: {_ybefore} -> {len(targets)}")
     LOG(f"    去重后目标详情页: {len(targets)} 个")
     if verbose and targets:
         LOG("    [变量追踪] 前 3 条解析结果:")
@@ -525,7 +551,7 @@ def _apply_offset_reset(offset, total_targets, expected_fp, actual_fp):
 
 def run(topic_keys, limit=0, dry_run=False, verbose=False, debug=False,
         workers=4, delay=0.35, custom_cfgs=None, db_path=None, batch_id=None,
-        offset=0, expected_fp=None, paper_type=None):
+        offset=0, expected_fp=None, paper_type=None, year_type=None):
     if ledgerio is not None and db_path:
         ledgerio.configure(db_path)     # 台账跟随调用方指定的库（压测库/生产库）
     if bc is not None and db_path:
@@ -534,6 +560,9 @@ def run(topic_keys, limit=0, dry_run=False, verbose=False, debug=False,
     paper_terms = _build_paper_terms(paper_type)
     if paper_terms:
         LOG(f"[试卷类型] paper_type={paper_type!r} -> 归一化词表 {paper_terms}")
+    year_terms = _build_year_terms(year_type)
+    if year_terms:
+        LOG(f"[年份] year_type={year_type!r} -> 年份词表 {year_terms}")
     all_rows, all_targets = [], []
 
     # topic key -> 配置。自定义 --url 的配置与预设 TOPICS 合并，统一查询。
@@ -544,7 +573,8 @@ def run(topic_keys, limit=0, dry_run=False, verbose=False, debug=False,
     for tk in topic_keys:
         all_targets.extend(collect_targets(session, tk, verbose,
                                            cfg=cfg_map.get(tk),
-                                           paper_terms=paper_terms))
+                                           paper_terms=paper_terms,
+                                           year_terms=year_terms))
 
     # 切片前捕获目标总数（供分批流水线判定结束条件 offset>=总目标；不受 --offset/--limit 影响）。
     total_targets = len(all_targets)
@@ -628,6 +658,10 @@ def run(topic_keys, limit=0, dry_run=False, verbose=False, debug=False,
                         LOG(f"    [试卷类型] 下钻过滤 {paper_terms}: {_before} -> {len(_subs)}")
                     else:
                         _subs = rec["drill_out"]
+                    if year_terms:
+                        _yb = len(_subs)
+                        _subs = [s for s in _subs if record_matches_year(s, year_terms)]
+                        LOG(f"    [年份筛选] 下钻过滤 {year_terms}: {_yb} -> {len(_subs)}")
                     next_frontier.extend(_subs)
                 else:
                     resolved.append((rec, []))   # 真无附件，清单里体现
@@ -814,6 +848,9 @@ def main():
                     help="只采集指定试卷类型（如 北京卷 / 北京；可逗号分隔多值）。"
                          "缺省=不筛选。匹配基于表格『试卷类型』列与详情页标题，"
                          "已做罗马数字/全角/大小写归一，并做别名展开（北京卷→北京）")
+    ap.add_argument("--year-type", default=None,
+                    help="按年份筛选（如 2026；可逗号分隔多值）。匹配表格年份列 col（兼容 2026.1/2026-2027）。"
+                         "不传=不筛选（旧行为不变）")
     ap.add_argument("--db-path", default=None,
                     help="台账库路径（默认生产库 pipeline.db；pipeline.py 自动传）")
     ap.add_argument("--batch-id", default=None,
@@ -862,7 +899,8 @@ def main():
                             db_path=args.db_path, batch_id=bid,
                             offset=max(0, int(args.offset or 0)),
                             expected_fp=(args.expected_fp or None),
-                            paper_type=(args.paper_type or None))
+                            paper_type=(args.paper_type or None),
+                            year_type=(args.year_type or None))
     except KeyboardInterrupt:
         LOG("\n[中断] 用户终止")
         sys.exit(1)
