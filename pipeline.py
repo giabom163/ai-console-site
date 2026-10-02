@@ -737,6 +737,7 @@ class SniffResult:
         self.error = ""
         self.note = ""
         self.paper_cands = []     # 供交互自选的"试卷类型"候选（collect_paper_candidates 产出；默认空）
+        self.year_cands = []      # 供交互自选的"年份"候选（collect_year_candidates 产出；默认空）
 
 def _sniff_session():
     import requests
@@ -755,7 +756,7 @@ def _looks_like_pdf(u):
     from urllib.parse import urlparse
     return urlparse(u).path.lower().endswith(".pdf")
 
-def sniff_url(url, timeout=20, max_preview=10, paper_type=None):
+def sniff_url(url, timeout=20, max_preview=10, paper_type=None, year_type=None):
     """嗅探一个 URL。永不抛异常；失败信息放进 result.error。"""
     from urllib.parse import urljoin, unquote, urlparse
     res = SniffResult(url=url)
@@ -782,9 +783,11 @@ def sniff_url(url, timeout=20, max_preview=10, paper_type=None):
     if "gaokzx.com" in host:        # 已知站点：走精确解析
         try:
             from gaokzx_parse import (extract_files, parse_topic,
-                                      record_matches, collect_paper_candidates)
+                                      record_matches, record_matches_year,
+                                      collect_paper_candidates, collect_year_candidates)
             recs = parse_topic(html)
             res.paper_cands = collect_paper_candidates(recs)   # 候选列表（默认不据此过滤）
+            res.year_cands = collect_year_candidates(recs)     # 年份候选（取自 col 列，默认不据此过滤）
             _flt_suffix = ""
             if paper_type:
                 from gaokzx_download import _build_paper_terms
@@ -793,6 +796,13 @@ def sniff_url(url, timeout=20, max_preview=10, paper_type=None):
                     _b = len(recs)
                     recs = [r for r in recs if record_matches(r, _pterms)]
                     _flt_suffix = f"（试卷类型筛选：{_b} -> {len(recs)}）"
+            if year_type:
+                from gaokzx_download import _build_year_terms
+                _yterms = _build_year_terms(year_type)
+                if _yterms:
+                    _b2 = len(recs)
+                    recs = [r for r in recs if record_matches_year(r, _yterms)]
+                    _flt_suffix += f"（年份筛选：{_b2} -> {len(recs)}）"
             res.title = _html_title(html)
             if recs:
                 res.kind = "gaokzx_topic"
@@ -2180,7 +2190,7 @@ def _is_benign_noise(line):
 
 def step_discover_download(topic="all", limit=None, workers=6, delay=0.5,
                            url=None, name=None, dry=False, batch_id=None, offset=None,
-                           expected_fp=None, paper_type=None):
+                           expected_fp=None, paper_type=None, year_type=None):
     """采集 + 下载（步骤1）。每次任务先建批次（manifest），并把 --batch-id 传给下载器；下载器
     结束时输出 RESULT{target_pages, pdf_count, downloaded} 并以退出码 2 表示空结果。返回
     (rc, result)：rc=2 表示 0 目标/0 PDF —— 调用方必须立即中止全流程。
@@ -2200,6 +2210,7 @@ def step_discover_download(topic="all", limit=None, workers=6, delay=0.5,
     if offset: cmd += ["--offset", str(offset)]
     if expected_fp: cmd += ["--expected-fp", str(expected_fp)]
     if paper_type: cmd += ["--paper-type", str(paper_type)]
+    if year_type: cmd += ["--year-type", str(year_type)]
     if dry: cmd += ["--dry-run"]
     if bid: cmd += ["--batch-id", bid]
     cmd += ["--db-path", str(DB)]      # 台账跟随当前库（压测库/生产库）
@@ -2233,6 +2244,12 @@ def step_discover_download(topic="all", limit=None, workers=6, delay=0.5,
         # 情况 A：真·空（目标详情页本身就没解析出来）——正常信号，沿用 rc=2。
         if _tp == 0:
             print(">>> 未发现可下载PDF（目标详情页=0），已停止")
+            return 2, result
+        # 分批流水线后续轮次（offset > 0）：本批目标页都没 PDF 附件是正常现象
+        # （"作文题目"/"范文"等非附件页），按真·空返回 rc=2，让分批循环 break，
+        # 不再误判 rc=3 中止整个 run、也不再丢掉已跑完的前几轮成果。
+        if offset and int(offset) > 0:
+            print(f">>> 本批 {_tp} 个目标页均无 PDF 附件（offset={offset}，非首轮），按正常空结束处理。")
             return 2, result
         # 情况 B：疑似解析失效（有目标页但一页 PDF 都没有）——绝不当正常结束，返回 rc=3 硬中止。
         print(_SEP)
@@ -4897,7 +4914,7 @@ def _flow_ctx(no_batch_msg, stage, empty_msg):
         return None, None
     return bid, pairs
 
-def _ask_paper_type(cands, ask=None):
+def _ask_paper_type(cands, ask=None, label="试卷类型"):
     """交互式选择试卷类型（菜单 [d] 与 auto 暂停共用）。
 
     cands: collect_paper_candidates 产出的候选原文列表；空列表 -> 不询问直接 (None,'skip')。
@@ -4913,7 +4930,7 @@ def _ask_paper_type(cands, ask=None):
     ask = ask or (lambda p: _ask(p))
     for _ in range(3):
         _hr("-")
-        print("按试卷类型筛选（可选，直接回车=不筛选抓全部）：")
+        print(f"按{label}筛选（可选，直接回车=不筛选抓全部）：")
         for i, c in enumerate(cands[:30], 1):
             print(f"  {i:2d}. {c}")
         if len(cands) > 30:
@@ -4973,10 +4990,10 @@ def flow_download():
         if c == "4":
             print("已退出。")
             raise SystemExit(0)
-        if c == "1": return _download_topic_menu(None, url=url, paper_cands=res.paper_cands)
+        if c == "1": return _download_topic_menu(None, url=url, paper_cands=res.paper_cands, year_cands=res.year_cands)
         if c == "2":
             n = _ask_int("请输入要抓取的数量（如 10）: ", lo=1)
-            return _download_topic_menu(n, url=url, paper_cands=res.paper_cands)
+            return _download_topic_menu(n, url=url, paper_cands=res.paper_cands, year_cands=res.year_cands)
 
 def _decide_menu(res):
     _hr("-")
@@ -4989,7 +5006,8 @@ def _decide_menu(res):
     _hr("-")
     return _ask("请输入选项 [1/2/3/4]: ", "4", auto="1")
 
-def _download_topic_menu(limit=None, url=None, paper_type=None, paper_cands=None):
+def _download_topic_menu(limit=None, url=None, paper_type=None, paper_cands=None,
+                         year_type=None, year_cands=None):
     """专题选择菜单。传了 url 就走自定义专题页（--url），否则走预设 topic 1/2/all。"""
     if url:
         print(f"\n将使用当前网址作为自定义专题：\n  {url}")
@@ -4997,12 +5015,16 @@ def _download_topic_menu(limit=None, url=None, paper_type=None, paper_cands=None
             _pt, _act = _ask_paper_type(paper_cands, ask=_ask)
             if _act == "set":
                 paper_type = _pt
+        if year_cands:
+            _yt, _yact = _ask_paper_type(year_cands, ask=_ask, label="年份")
+            if _yact == "set":
+                year_type = _yt
         if _ask("确认开始？[y/N]: ", "n", auto="y").lower() != "y":
             print("已取消。")
             return
         ensure_dirs(verbose=False)
         print(f"\n>>> 将以 --url 下载" f"{' limit=' + str(limit) if limit else '（全量）'} ...")
-        rc, _res = step_discover_download(limit=limit, url=url, paper_type=paper_type)
+        rc, _res = step_discover_download(limit=limit, url=url, paper_type=paper_type, year_type=year_type)
         return _after_download(rc, "——见上方 [SUSPICIOUS] 提示")
     print("\n选择专题：")
     print("  [1] 专题1 2025-2026北京各中学高三每月月考试题及答案")
@@ -5314,6 +5336,7 @@ def flow_auto():
         workers=6, delay=0.5, wm_workers=6,
         ocr_workers=OCR_WORKERS_DEFAULT, ocr_threads=OCR_THREADS_PER_WORKER,
         start_stage=start_stage, file_id=None, batch_id=_resume_bid,
+        year_type=None,
         force=False, dry_run=False, chunk=24, force_full_run=False,
         ask_on_empty=False, min_pdf_ratio=None, ask_on_stage_failure=False,
         ask_on_resume=False, force_rerun_failed=False)
@@ -5848,6 +5871,24 @@ def _run_auto_impl(args):
                         if _act == "abort":
                             print(">>> [auto] 已取消（建批次前中止，未动游标/批次）。")
                             return 1
+                _yt = getattr(args, "year_type", None)
+                if url and not _yt:
+                    # 未显式 --year-type：进入下载前暂停一次问年份（与试卷类型平行，仅问一次贯穿所有轮）。
+                    # 候选取自本页 col 年份列（collect_year_candidates）；EOF/中断 -> 保守中止 return 1。
+                    try:
+                        _ycands = getattr(sniff_url(url), "year_cands", []) or []
+                    except Exception:
+                        _ycands = []
+                    if _ycands:
+                        def _ask_auto_y(_p):
+                            try:
+                                return input(_p)
+                            except (EOFError, KeyboardInterrupt):
+                                return None
+                        _yt, _yact = _ask_paper_type(_ycands, ask=_ask_auto_y, label="年份")
+                        if _yact == "abort":
+                            print(">>> [auto] 已取消（建批次前中止，未动游标/批次）。")
+                            return 1
                 _dl_delay = getattr(args, "delay", 0.5)
                 if _dl_delay is None: _dl_delay = 0.5
                 _dl_workers = getattr(args, "workers", None) or 6
@@ -5900,7 +5941,7 @@ def _run_auto_impl(args):
                             f"抓取下载(第{r_idx}批)", step_discover_download, topic, per,
                             _dl_workers, _dl_delay, url=url,
                             name=getattr(args, "name", None), batch_id=_bid, offset=off,
-                            expected_fp=_pfp, paper_type=_pt)
+                            expected_fp=_pfp, paper_type=_pt, year_type=_yt)
                         rc_dl = _dl[0] if isinstance(_dl, (tuple, list)) and _dl else _dl
                         _dres = _dl[1] if isinstance(_dl, (tuple, list)) and len(_dl) > 1 else None
                         # rc=3（疑似解析失效）：硬中止，绝不落入 rc==2「正常空结束」分支。
@@ -6030,7 +6071,7 @@ def _run_auto_impl(args):
                         getattr(args, "limit", None),
                         _dl_workers,
                         _dl_delay, url=url, name=getattr(args, "name", None),
-                        paper_type=_pt)
+                        paper_type=_pt, year_type=_yt)
                     rc_dl = _dl[0] if isinstance(_dl, (tuple, list)) and _dl else _dl
                     # rc=3（疑似解析失效）：硬中止，绝不落入 rc==2「正常空结束」分支。
                     if rc_dl == 3:
@@ -6305,6 +6346,9 @@ def main():
     ap.add_argument("--paper-type", default=None,
                     help="按试卷类型筛选专题页表格行（如 北京卷；可逗号分隔多值）。"
                          "不传=抓全部（旧行为不变）；透传给下载器 --paper-type")
+    ap.add_argument("--year-type", default=None,
+                    help="按年份筛选专题页表格行（如 2026；可逗号分隔多值；匹配 col 列）。"
+                         "不传=不筛选；透传给下载器 --year-type")
     ap.add_argument("--limit", type=int, default=None, help="本步只处理前 N 个文件")
     ap.add_argument("--ocr-root", default=None, help=f"OCR 根目录（默认 {STAGE_CLEANED}，即给去水印成品补文字层）")
     ap.add_argument("--qc-root", default=None, help=f"质控根目录（默认 {STAGE_CLEANED}）")
@@ -6485,7 +6529,8 @@ def main():
             _dl = run_step_safe("抓取下载", step_discover_download,
                                 args.topic, args.limit, args.workers, args.delay,
                                 url=args.url, name=getattr(args, "name", None),
-                                paper_type=getattr(args, "paper_type", None))
+                                paper_type=getattr(args, "paper_type", None),
+                                year_type=getattr(args, "year_type", None))
             # rc=2（0 目标/0 PDF）硬保护：立即中止，绝不继续去水印/OCR/打包空转（提示语已在 step 内打印）。
             _dl_rc = _dl[0] if isinstance(_dl, (tuple, list)) and _dl else _dl
             if _dl_rc == 2:
