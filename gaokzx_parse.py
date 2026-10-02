@@ -388,7 +388,9 @@ _ROMAN_MAP = str.maketrans({"\u2160": "I", "\u2161": "II", "\u2162": "III", "\u2
 
 # 导航词（归一化后）：表格里「试题|答案」这类链接列文字，本身不携带试卷类型信息，
 # 命中它们时应改看左邻单元格（group[-1]）取真正的类型标签。
-_NAV_LABELS = {"试题", "答案", "试题|答案", "解析", "下载", "查看"}
+# 站点原文里竖线常用全角/异体（丨 U+4E28、｜ U+FF5C、┆ U+2502），paper_type_key 已统一
+# 归一到半角 |，故此处判据一律写半角形式；「适应性试题|答案」「——」为中考页实测噪声。
+_NAV_LABELS = {"试题", "答案", "试题|答案", "适应性试题|答案", "解析", "下载", "查看", "——"}
 
 # 候选黑名单（归一化后）：表头列名，不作为「试卷类型」候选展示。
 _HEADER_NOISE = {"科目", "试卷类型"}
@@ -399,6 +401,9 @@ def paper_type_key(s):
     → 全角字母/数字转半角 → casefold。非字符串输入返回 ""。"""
     if not isinstance(s, str):
         return ""
+    # 全角/异体竖线统一成半角 |：站点链接「试题丨答案」用 U+4E28/FF5C/2502，不归一则
+    # is_nav_label 判假、导航词漏进试卷类型候选（中考页实测）。放最前面，后续空白/罗马归一不受影响。
+    s = s.replace("\u4e28", "|").replace("\uff5c", "|").replace("\u2502", "|")
     t = re.sub(r"\s+", "", s).translate(_ROMAN_MAP)
     # 全角字母数字（U+FF10-19 / FF21-3A / FF41-5A）→ 半角：码位减 0xFEE0；
     # 全角括号「（）」(U+FF08) 等不在这些区间内，原样保留，不受影响。
@@ -456,6 +461,41 @@ def collect_paper_candidates(recs):
         seen.add(key)
         out.append(cand)
     return out
+
+
+def record_matches_year(rec, years):
+    """年份匹配：只看 col（表格年份列）与 text；**绝不扫 section**（整页标题每行都含
+    年份如 2024-2026，扫了会全命中致筛选失效）。years 为空/全空白 -> True（是否启用
+    由调用方 `if year_terms and not record_matches_year(...)` 短路决定，非"全不匹配"）。
+    col 用 startswith 兼容 '2026' / '2026.1' / '2026-2027'；text 命中作子串兜底。"""
+    if not years:
+        return True
+    want = [str(y).strip() for y in years if str(y).strip()]
+    if not want:
+        return True
+    col = str(rec.get("col") or "").strip()
+    text = str(rec.get("text") or "")
+    for y in want:
+        if col and col.startswith(y):
+            return True
+        if y in text:
+            return True
+    return False
+
+
+def collect_year_candidates(recs):
+    """从已解析记录的 col 字段抽年份候选（去重、降序）。col 无年份则返回空。
+    只看 col（年份列），不扫 section（整页标题含年份范围，会污染候选）。"""
+    seen = set()
+    for r in recs or []:
+        col = r.get("col")
+        if not col:
+            continue
+        for m in re.finditer(r"(20\d{2})", str(col)):
+            y = int(m.group(1))
+            if 2010 <= y <= 2035:
+                seen.add(str(y))
+    return sorted(seen, reverse=True)
 
 
 if __name__ == "__main__":
