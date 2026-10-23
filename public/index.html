@@ -48,7 +48,7 @@ footer{text-align:center;color:var(--muted);font-size:11px;padding:26px 0}
 </head>
 <body>
 <header>
-  <div><h1>AI 就业核查台</h1><div class="sub">岗位真实性 · 每日新增/关闭 · 来源可追溯</div></div>
+  <div><h1>AI 就业核查台</h1><div class="sub">岗位分类 · 链接核验 · 来源可追溯</div></div>
   <nav>
     <button data-view="dashboard" class="active">总览</button>
     <button data-view="jobs">岗位库</button>
@@ -62,7 +62,7 @@ footer{text-align:center;color:var(--muted);font-size:11px;padding:26px 0}
     <div class="cards" id="cards"></div>
     <div class="grid">
       <div class="panel"><h2>近 14 天新增 / 关闭</h2><div class="legend"><span>新增</span><span class="closed">关闭</span></div><div id="trend"></div></div>
-      <div class="panel"><h2>真实性分布</h2><div id="levels"></div></div>
+      <div class="panel"><h2>链接核验分布</h2><div id="levels"></div></div>
     </div>
     <div class="grid">
       <div class="panel"><h2>在招最多的公司</h2><div id="companies"></div></div>
@@ -76,20 +76,29 @@ footer{text-align:center;color:var(--muted);font-size:11px;padding:26px 0}
       <div class="toolbar">
         <input id="q" placeholder="搜公司 / 岗位">
         <select id="f-company"><option value="">全部公司</option></select>
-        <select id="f-ai"><option value="ai">只看 AI 岗位</option><option value="">全部类型</option><option value="build">AI 研发（build）</option><option value="adjacent">AI 支撑（adjacent）</option><option value="none">非 AI（已剔除）</option></select>
-        <select id="f-level"><option value="">全部真实性</option><option>已验证</option><option>可信</option><option>待核验</option><option>低可信</option></select>
-        <select id="f-since"><option value="recent">近 3 个月</option><option value="2026-06-01">6 月之后</option><option value="all">全部时间</option></select>
-        <select id="f-status"><option value="open">在招</option><option value="closed">已关闭</option><option value="stale">长期未见</option><option value="">全部</option></select>
+        <select id="f-ai"><option value="ai">只看 AI 岗位</option><option value="build">AI 研发（build）</option><option value="adjacent">AI 支撑（adjacent）</option></select>
+        <select id="f-level"><option value="">全部核验状态</option><option value="已验证">链接核验通过</option><option>可信</option><option>待核验</option><option>低可信</option></select>
+        <select id="f-since"><option value="2026-06-01">2026-06-01 起</option></select>
+        <select id="f-status"><option value="open">在招</option></select>
         <button onclick="loadJobs(0)">筛选</button>
       </div>
       <div id="jobs-meta" class="meta"></div>
-      <table><thead><tr><th>公司</th><th>岗位</th><th>地点</th><th>AI</th><th>真实性</th><th>发布时间</th><th>首次发现</th><th>状态</th></tr></thead><tbody id="jobs-body"></tbody></table>
+      <table><thead><tr><th>公司</th><th>岗位</th><th>地点</th><th>AI</th><th>链接核验</th><th>发布时间</th><th>首次发现</th><th>状态</th></tr></thead><tbody id="jobs-body"></tbody></table>
       <div class="pager"><button onclick="pageJobs(-1)">上一页</button><button onclick="pageJobs(1)">下一页</button></div>
     </div>
   </section>
 
   <section id="view-signals" hidden>
-    <div class="panel"><h2>就业舆情 / 裁员信号</h2><p style="font-size:12px;color:#64748b">当前接入 AIHOT RSS；裁员信号源待接。</p><div id="signals-list"></div></div>
+    <div class="panel"><h2>AI 就业信息</h2>
+      <p style="font-size:12px;color:#64748b">已复核记录与待核验线索分别展示，每次最多显示50条。静态版每类最多收录最近采到的200条。搜索标注日期尚未核实；招聘线索不代表目前仍在招。</p>
+      <div class="toolbar">
+        <select id="signal-review"><option value="approved">已复核记录</option><option value="pending">待核验线索</option></select>
+        <select id="signal-category"><option value="">全部变化</option><option value="hiring">招聘</option><option value="layoff">裁员</option><option value="shrink">缩招</option><option value="freeze">停招</option></select>
+        <label>从 <input id="signal-since" type="date" style="min-width:140px"></label>
+        <label>至 <input id="signal-until" type="date" style="min-width:140px"></label>
+        <button onclick="loadSignals()">筛选</button>
+      </div>
+      <div id="signals-list"></div></div>
   </section>
 
   <section id="view-report" hidden>
@@ -97,17 +106,17 @@ footer{text-align:center;color:var(--muted);font-size:11px;padding:26px 0}
   </section>
 
   <section id="view-sources" hidden>
-    <div class="panel"><h2>数据源健康</h2><table><thead><tr><th>公司</th><th>ATS</th><th>岗位数</th><th>已验证</th><th>最近看到</th></tr></thead><tbody id="sources-body"></tbody></table></div>
+    <div class="panel"><h2>数据源健康</h2><table><thead><tr><th>公司</th><th>ATS</th><th>岗位数</th><th>链接核验通过</th><th>最近看到</th></tr></thead><tbody id="sources-body"></tbody></table></div>
   </section>
 </main>
 <div class="drawer" id="drawer"><button class="close" onclick="closeDrawer()">关闭</button><div id="drawer-body"></div></div>
-<footer>数据来自公开 ATS；真实性为来源可信度，不是对雇主的法律判断。</footer>
+<footer>数据来自公开招聘来源；时间显示为北京时间（Asia/Shanghai）。链接核验不代表岗位真实性或当前可投递；仅覆盖已收录来源。</footer>
 
 <script>
 (function(){
   var cache = {};
   async function data(){
-    if(!cache.d){ var r = await fetch('./console-data.json', {cache:'no-cache'}); cache.d = await r.json(); }
+    if(!cache.d){ var r = await orig('./console-data.json', {cache:'no-cache'}); if(!r.ok) throw new Error('Dataset HTTP '+r.status); cache.d = await r.json(); }
     return cache.d;
   }
   var orig = window.fetch ? window.fetch.bind(window) : null;
@@ -115,15 +124,38 @@ footer{text-align:center;color:var(--muted);font-size:11px;padding:26px 0}
   window.fetch = async function(input, init){
     var u = (typeof input === 'string') ? input : ((input && input.url) || '');
     var url = new URL(u, location.href);
-    if (url.pathname.indexOf('/api/') !== 0) return orig ? orig(input, init) : Promise.reject(new Error('no fetch'));
+    if (url.origin !== location.origin || url.pathname.indexOf('/api/') !== 0) return orig ? orig(input, init) : Promise.reject(new Error('no fetch'));
     var d = await data();
-    if (url.pathname === '/api/stats') return resp(d.stats);
-    if (url.pathname === '/api/sources') return resp({items: d.sources});
-    if (url.pathname === '/api/signals') return resp({items: d.signals || []});
-    if (url.pathname === '/api/report') return resp(d.report);
+    var since = url.searchParams.get('since');
+    if (url.pathname !== '/api/signals' && since && since !== d.stats.window_since) return new Response(JSON.stringify({error:'Unsupported static date window'}), {status:400});
+    var localDates = d.meta && d.meta.display_timezone === 'Asia/Shanghai';
+    var timeWarning = localDates ? '' : '旧数据尚未按北京时间重新导出；当日入库与趋势暂不展示。';
+    if (url.pathname === '/api/stats') return resp(Object.assign({}, d.stats, {generated_at:d.generated_at, time_warning:timeWarning, today_new:localDates?d.stats.today_new:null, trend:localDates?d.stats.trend:[]}));
+    if (url.pathname === '/api/sources') return resp({items: d.sources.map(function(s){
+      var jobs = d.jobs.filter(function(j){return j.company === s.name && j.status === 'open';});
+      return Object.assign({}, s, {jobs:jobs.length, verified:jobs.filter(function(j){return j.authenticity_level === '已验证';}).length});
+    })});
+    if (url.pathname === '/api/signals') {
+      var p = url.searchParams, review = p.get('review') || 'approved';
+      if (review !== 'approved' && review !== 'pending') return new Response(JSON.stringify({error:'unsupported review status'}), {status:400});
+      // Older datasets have no review metadata: never promote their RSS entries to reviewed events.
+      var items = review === 'pending' ? (d.signal_candidates || []) : (d.signals || []).filter(function(x){return x.review_status === 'approved';});
+      var category = p.get('category'), until = p.get('until');
+      if(category && !['hiring','layoff','shrink','freeze'].includes(category)) return new Response(JSON.stringify({error:'unsupported event category'}), {status:400});
+      if(category) items = items.filter(function(x){return x.category === category;});
+      function timestamp(v){return Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(v) ? v+'T00:00:00+08:00' : v);}
+      if((since && !Number.isFinite(timestamp(since))) || (until && !Number.isFinite(timestamp(until))) || (since && until && timestamp(since)>=timestamp(until))) return new Response(JSON.stringify({error:'invalid date bounds'}), {status:400});
+      if(since) items = items.filter(function(x){return x.published_at && timestamp(x.published_at) >= timestamp(since);});
+      if(until) items = items.filter(function(x){return x.published_at && timestamp(x.published_at) < timestamp(until);});
+      var cap = Math.min(200,Math.max(1,parseInt(p.get('limit') || '50',10)||50));
+      return resp({items:items.slice(0,cap)});
+    }
+    if (url.pathname === '/api/report') return resp(Object.assign({}, d.report, {today_new:localDates?d.report.today_new:null, signals:(d.signals||[]).filter(function(x){return x.review_status === 'approved';}).length, signal_candidates:(d.signal_candidates||[]).length, note:timeWarning+' 仅统计收录窗口内在招 AI 岗位；链接核验通过代表最近一次 URL 核验通过，不保证当前仍可投递。剔除与合并数为库内累计。'}));
     if (url.pathname === '/api/jobs') {
       var p = url.searchParams;
-      var items = d.jobs.slice();
+      var status = p.get('status') || 'open';
+      if(status !== 'open') return new Response(JSON.stringify({error:'Static dataset only includes open jobs'}), {status:400});
+      var items = d.jobs.filter(function(j){return j.status === status;});
       var q = (p.get('q') || '').trim().toLowerCase();
       if (q) items = items.filter(function(j){ return ((j.title||'') + ' ' + (j.company||'')).toLowerCase().indexOf(q) >= 0; });
       var company = p.get('company');
@@ -134,8 +166,8 @@ footer{text-align:center;color:var(--muted);font-size:11px;padding:26px 0}
       var level = p.get('level');
       if (level) items = items.filter(function(j){ return j.authenticity_level === level; });
       var total = items.length;
-      var limit = parseInt(p.get('limit') || '30', 10);
-      var offset = parseInt(p.get('offset') || '0', 10);
+      var limit = Math.min(100, Math.max(1, parseInt(p.get('limit') || '30', 10) || 30));
+      var offset = Math.max(0, parseInt(p.get('offset') || '0', 10) || 0);
       return resp({total: total, limit: limit, offset: offset, since: d.stats.window_since,
                    items: items.slice(offset, offset + limit)});
     }
@@ -145,7 +177,7 @@ footer{text-align:center;color:var(--muted);font-size:11px;padding:26px 0}
       var job = null;
       for (var i = 0; i < d.jobs.length; i++) if (d.jobs[i].id === id) { job = d.jobs[i]; break; }
       if (!job) return new Response(JSON.stringify({error:'not found'}), {status:404});
-      return resp({job: job, snapshots: [], changes: []});
+      return resp({job: job, snapshots: [], changes: [], history_available: false});
     }
     return new Response(JSON.stringify({error:'not found'}), {status:404});
   };
@@ -157,21 +189,22 @@ const $ = s => document.querySelector(s);
 let jobOffset = 0, jobTotal = 0;
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function badge(v){const m={'build':'build','adjacent':'adjacent','exposed':'exposed','none':'none'};const l={'build':'AI研发','adjacent':'AI支撑','exposed':'受影响','none':'非AI'};return `<span class="badge ${m[v]||'none'}">${esc(l[v]||v)}</span>`;}
-function levelBadge(v){const m={'已验证':'verified','可信':'trusted','待核验':'pending','低可信':'low'};return `<span class="badge ${m[v]||'pending'}">${esc(v)}</span>`;}
-function fmt(s){if(!s)return '—';const d=new Date(s);if(isNaN(d.getTime()))return esc(s);const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;}
+function levelBadge(v){const m={'已验证':'verified','可信':'trusted','待核验':'pending','低可信':'low'};return `<span class="badge ${m[v]||'pending'}">${esc(v==='已验证'?'链接核验通过':v)}</span>`;}
+function fmt(s){if(!s)return '—';const raw=String(s);if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return raw;if(!/(Z|[+-]\d{2}:?\d{2})$/i.test(raw))return esc(raw.replace('T',' '));const d=new Date(raw);if(isNaN(d.getTime()))return esc(raw);const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(d);const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;}
 async function api(u){const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 function curSince(){const v=$('#f-since')?$('#f-since').value:'recent';return v==='recent'?'':v;}
 async function loadDashboard(){
   const since=curSince();
   const d=await api('/api/stats'+(since?'?since='+encodeURIComponent(since):''));
-  $('#cards').innerHTML=[['AI 岗位',d.ai_total,''],['AI 研发',d.build,'green'],['AI 支撑',d.adjacent,''],['已验证',d.verified,'green'],['已剔除非 AI',d.excluded,'amber']]
+  $('#cards').innerHTML=[['AI 岗位',d.ai_total,''],['AI 研发',d.build,'green'],['AI 支撑',d.adjacent,''],['链接核验通过',d.verified,'green'],['累计剔除非 AI',d.excluded,'amber']]
     .map(([l,n,c])=>`<div class="card ${c}"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
   renderTrend(d.trend||[]);
+  if(d.time_warning)$('#trend').innerHTML='<div class="empty">'+esc(d.time_warning)+'</div>';
   const max=Math.max(...(d.levels||[]).map(x=>x.value),1);
-  $('#levels').innerHTML=(d.levels||[]).map(x=>`<div class="bar"><span>${esc(x.label)}</span><span class="track"><i style="width:${x.value/max*100}%;background:${x.label==='已验证'?'#0f766e':x.label==='低可信'?'#b42318':'#1d4ed8'}"></i></span><b>${x.value}</b></div>`).join('')||'<div class="empty">暂无</div>';
+  $('#levels').innerHTML=(d.levels||[]).map(x=>`<div class="bar"><span>${esc(x.label==='已验证'?'链接核验通过':x.label)}</span><span class="track"><i style="width:${x.value/max*100}%;background:${x.label==='已验证'?'#0f766e':x.label==='低可信'?'#b42318':'#1d4ed8'}"></i></span><b>${x.value}</b></div>`).join('')||'<div class="empty">暂无</div>';
   const cmax=Math.max(...(d.top_companies||[]).map(x=>x.value),1);
   $('#companies').innerHTML=(d.top_companies||[]).map(x=>`<div class="bar"><span>${esc(x.label)}</span><span class="track"><i style="width:${x.value/cmax*100}%"></i></span><b>${x.value}</b></div>`).join('')||'<div class="empty">暂无</div>';
-  $('#notes').innerHTML=`<div>• 时间窗口：<b>${d.window_since}</b> 起（默认近 3 个月，不早于 2026-06-01；更早岗位不展示、不再采集）</div><div>• 今日新增：<b>${d.today_new}</b></div><div>• 存活复检：<b>${d.liveness_checked||0}</b> 条已核（已关闭 ${d.closed||0} · 长期未见 ${d.stale||0}）</div><div>• 非 AI 岗位已剔除 <b>${d.excluded||0}</b> 条（词典判定 none，保留原始记录不物理删除）</div><div>• 已合并重复：<b>${d.merged||0}</b> 条（同公司/同岗位/同城市，保留最新）</div><div>• 已验证 ${d.verified} 条，其余为“待核验”，需继续做 URL 校验。</div><div>• 口径：build=直接研发 AI，adjacent=直接支撑 AI；关键词采集，非全站岗位。</div>`;
+  $('#notes').innerHTML=`<div>• 数据版本时间：${fmt(d.generated_at)}</div><div>• 时间窗口：<b>${d.window_since}</b> 起（按来源发布时间筛选；岗位库仅提供在招 AI 岗位）</div><div>• 数据版本当日入库（北京时间）：<b>${d.today_new??'待重新导出'}</b></div><div>• 存活复检：<b>${d.liveness_checked||0}</b> 条已核（全库累计：已关闭 ${d.closed||0} · 长期未见 ${d.stale||0}）</div><div>• 库内累计剔除非 AI 岗位 <b>${d.excluded||0}</b> 条（词典判定 none，保留原始记录不物理删除）</div><div>• 库内累计合并重复：<b>${d.merged||0}</b> 条（累计记录数）</div><div>• 链接核验通过 ${d.verified} 条，其余为其他核验状态；以最后核验时间为准，不保证当前仍可投递。</div><div>• 口径：build=直接研发 AI，adjacent=直接支撑 AI；关键词采集，非全站岗位。</div>`;
 }
 function renderTrend(rows){
   if(!rows.length){$('#trend').innerHTML='<div class="empty">暂无趋势</div>';return;}
@@ -179,7 +212,7 @@ function renderTrend(rows){
     const r=rows[0],max=Math.max(r.new_jobs||0,r.closed_jobs||0,1);
     $('#trend').innerHTML=`<div class="bar"><span>${esc(r.day)} 新增</span><span class="track"><i style="width:${(r.new_jobs||0)/max*100}%;background:#1d4ed8"></i></span><b>${r.new_jobs||0}</b></div>
     <div class="bar"><span>${esc(r.day)} 关闭</span><span class="track"><i style="width:${(r.closed_jobs||0)/max*100}%;background:#e05a47"></i></span><b>${r.closed_jobs||0}</b></div>
-    <p style="font-size:12px;color:#64748b">首次入库，只有一天数据；后续每天追加后显示双线趋势。</p>`;
+    <p style="font-size:12px;color:#64748b">当前窗口只有一天事件记录，暂以条形图展示。</p>`;
     return;
   }
   const W=620,H=210,PL=34,PR=12,PT=12,PB=26;
@@ -203,16 +236,16 @@ async function loadJobs(offset=jobOffset){
   if(curSince())p.set('since',curSince());
   const d=await api('/api/jobs?'+p);
   jobTotal=d.total;
-  $('#jobs-meta').textContent=`共 ${d.total} 条，当前 ${d.offset+1}-${Math.min(d.offset+d.items.length,d.total)}`;
+  $('#jobs-meta').textContent=`共 ${d.total} 条，当前 ${d.items.length?d.offset+1:0}-${Math.min(d.offset+d.items.length,d.total)}`;
   $('#jobs-body').innerHTML=d.items.map(j=>`<tr class="row" onclick="openJob('${j.id}')">
     <td>${esc(j.company)}</td><td>${esc(j.title)}</td><td>${esc(j.location||'—')}</td>
-    <td>${badge(j.ai_relevance)}</td><td>${levelBadge(j.authenticity_level)} ${Math.round(j.authenticity_score)}</td>
+    <td>${badge(j.ai_relevance)}</td><td>${levelBadge(j.authenticity_level)}</td>
     <td>${fmt(j.posted_at).slice(0,10)}</td><td>${fmt(j.first_seen).slice(0,10)}</td><td>${esc(j.status)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">没有匹配岗位</td></tr>';
 }
 function pageJobs(delta){const next=jobOffset+delta*30;if(next<0||next>=jobTotal)return;loadJobs(next);}
 async function openJob(id){
   const d=await api('/api/jobs/'+encodeURIComponent(id));const j=d.job;
-  $('#drawer-body').innerHTML=`<h3>${esc(j.title)}</h3><div class="meta">${esc(j.company)} · ${esc(j.location||'')} · ${esc(j.ai_relevance)} · ${esc(j.authenticity_level)} ${Math.round(j.authenticity_score)}</div>
+  $('#drawer-body').innerHTML=`<h3>${esc(j.title)}</h3><div class="meta">${esc(j.company)} · ${esc(j.location||'')} · ${esc(j.ai_relevance)} · ${levelBadge(j.authenticity_level)}</div>
   <div class="kv"><div><b>来源：</b>${esc(j.source)}</div><div><b>状态：</b>${esc(j.status)}</div>
   <div><b>首次发现：</b>${fmt(j.first_seen)}</div><div><b>最近看到：</b>${fmt(j.last_seen)}</div>
   <div><b>最后核验：</b>${fmt(j.last_verified_at||'')}</div><div><b>HTTP：</b>${esc(j.http_status??'—')}</div>
@@ -220,21 +253,30 @@ async function openJob(id){
   <div><b>AI 判定依据：</b>${esc(j.ai_reason||'—')}</div>
   <div><b>申请链接：</b><a href="${esc(j.url||'#')}" target="_blank" rel="noreferrer">打开原始岗位</a></div>
   <div><b>薪资：</b>${j.salary_min?`${esc(j.currency||'')} ${j.salary_min}–${j.salary_max||''}`:'未披露'}</div></div>
-  <p style="font-size:12px;color:#64748b;margin-top:16px">真实性为来源可信度：ATS 原始来源、域名匹配、最近确认共同决定；不是对雇主的法律判断。</p>`;
+  <p style="font-size:12px;color:#64748b;margin-top:16px">链接核验通过仅代表最近一次 URL 核验通过；不代表岗位真实性或当前仍可投递。核验分数不是概率。</p>`;
   $('#drawer').classList.add('open');
 }
 function closeDrawer(){$('#drawer').classList.remove('open');}
+function signalUrl(value){try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?esc(u.href):'#';}catch{return '#';}}
 async function loadSignals(){
-  const d=await api('/api/signals');
-  $('#signals-list').innerHTML=(d.items||[]).map(x=>`<div class="event" style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #eef3f9"><span class="badge none">${esc(x.tag)}</span><div><a href="${esc(x.url)}" target="_blank" rel="noreferrer" style="color:#172033;text-decoration:none;font-weight:600">${esc(x.title)}</a><div style="font-size:12px;color:#64748b;margin-top:4px">${esc(x.source)} · ${fmt(x.published_at)}</div></div></div>`).join('')||'<div class="empty">暂无信号</div>';
+  const p=new URLSearchParams({review:$('#signal-review').value,limit:'50'});
+  if($('#signal-category').value)p.set('category',$('#signal-category').value);
+  if($('#signal-since').value)p.set('since',$('#signal-since').value);
+  if($('#signal-until').value){const end=new Date($('#signal-until').value+'T00:00:00Z');end.setUTCDate(end.getUTCDate()+1);p.set('until',end.toISOString().slice(0,10));}
+  const labels={unverified:'事实待核验',denial_candidate:'可能为否认/辟谣',speculation_candidate:'可能为传闻/预测',reported:'媒体报道',official_announcement:'官方宣布',implemented:'已实施',denied:'否认/更正',rumor:'传闻',prediction:'预测'};
+  const scopes={pending:'AI关联待复核',ai_role:'AI岗位',ai_team:'AI团队',ai_impact:'来源声称AI影响',ai_company_other:'AI企业其他岗位'};
+  try{
+    const d=await api('/api/signals?'+p);
+    $('#signals-list').innerHTML=(d.items||[]).map(x=>`<div class="event" style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #eef3f9"><span class="badge none">${esc(x.tag)}</span><div><a href="${signalUrl(x.url)}" target="_blank" rel="noreferrer" style="color:#172033;text-decoration:none;font-weight:600">${esc(x.title)}</a><div style="font-size:12px;color:#64748b;margin-top:4px">${esc(x.source)} · ${x.date_basis==='source_verified'?'原文发布时间':x.date_basis==='search_index'?'搜索标注时间（待核实）':'发布时间未知'}：${fmt(x.published_at)} · ${esc(labels[x.claim_status]||'事实待核验')} · ${esc(scopes[x.ai_scope]||'AI关联待复核')}</div><div style="font-size:12px;margin-top:6px">${esc(x.summary||'')}</div><div class="meta">最近采到：${fmt(x.last_seen)}；招聘有效性：${x.liveness==='active'?'最近核验可申请':'未确认'}${x.last_verified_at?'（'+fmt(x.last_verified_at)+'）':''}</div></div></div>`).join('')||'<div class="empty">当前筛选下暂无记录</div>';
+  }catch(e){$('#signals-list').innerHTML='<div class="empty">加载失败：'+esc(e.message)+'</div>';}
 }
 async function loadReport(){
   const d=await api('/api/report');
   $('#report-body').innerHTML=`<div class="kv" style="font-size:13px;line-height:2">
     <div><b>生成时间：</b>${fmt(d.generated_at)}</div>
-    <div><b>AI 岗位：</b>共 ${d.total} 条（AI 研发 ${d.build} · AI 支撑 ${d.adjacent}），非 AI 已剔除 ${d.excluded||0} 条</div>
-    <div><b>真实性：</b>已验证 ${d.verified} 条，待核验 ${d.pending} 条</div>
-    <div><b>今日新增：</b>${d.today_new} 条；已合并重复 ${d.merged||0} 条；监控公司 ${d.companies} 家；舆情信号 ${d.signals} 条</div>
+    <div><b>AI 岗位：</b>共 ${d.total} 条（AI 研发 ${d.build} · AI 支撑 ${d.adjacent}），库内累计剔除非 AI ${d.excluded||0} 条</div>
+    <div><b>链接核验：</b>通过 ${d.verified} 条，其他核验状态 ${d.pending} 条</div>
+    <div><b>数据版本当日入库（北京时间）：</b>${d.today_new??'待重新导出'} 条；库内累计合并重复 ${d.merged||0} 条；监控公司 ${d.companies} 家；本批已复核信息 ${d.signals} 条；待核验线索 ${d.signal_candidates||0} 条</div>
     <div><b>Top 公司：</b>${(d.top_companies||[]).map(x=>x.label+' '+x.value).join(' · ')}</div>
     <div style="margin-top:10px;color:#64748b">${esc(d.note)}</div></div>`;
 }
