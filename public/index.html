@@ -158,6 +158,7 @@ let jobOffset = 0, jobTotal = 0;
 function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function badge(v){const m={'build':'build','adjacent':'adjacent','exposed':'exposed','none':'none'};const l={'build':'AI研发','adjacent':'AI支撑','exposed':'受影响','none':'非AI'};return `<span class="badge ${m[v]||'none'}">${esc(l[v]||v)}</span>`;}
 function levelBadge(v){const m={'已验证':'verified','可信':'trusted','待核验':'pending','低可信':'low'};return `<span class="badge ${m[v]||'pending'}">${esc(v)}</span>`;}
+function fmt(s){if(!s)return '—';const d=new Date(s);if(isNaN(d.getTime()))return esc(s);const p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;}
 async function api(u){const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 function curSince(){const v=$('#f-since')?$('#f-since').value:'recent';return v==='recent'?'':v;}
 async function loadDashboard(){
@@ -206,15 +207,15 @@ async function loadJobs(offset=jobOffset){
   $('#jobs-body').innerHTML=d.items.map(j=>`<tr class="row" onclick="openJob('${j.id}')">
     <td>${esc(j.company)}</td><td>${esc(j.title)}</td><td>${esc(j.location||'—')}</td>
     <td>${badge(j.ai_relevance)}</td><td>${levelBadge(j.authenticity_level)} ${Math.round(j.authenticity_score)}</td>
-    <td>${esc(j.posted_at?(j.posted_at.slice(0,10)):'—')}</td><td>${esc((j.first_seen||'').slice(0,10))}</td><td>${esc(j.status)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">没有匹配岗位</td></tr>';
+    <td>${fmt(j.posted_at).slice(0,10)}</td><td>${fmt(j.first_seen).slice(0,10)}</td><td>${esc(j.status)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">没有匹配岗位</td></tr>';
 }
 function pageJobs(delta){const next=jobOffset+delta*30;if(next<0||next>=jobTotal)return;loadJobs(next);}
 async function openJob(id){
   const d=await api('/api/jobs/'+encodeURIComponent(id));const j=d.job;
   $('#drawer-body').innerHTML=`<h3>${esc(j.title)}</h3><div class="meta">${esc(j.company)} · ${esc(j.location||'')} · ${esc(j.ai_relevance)} · ${esc(j.authenticity_level)} ${Math.round(j.authenticity_score)}</div>
   <div class="kv"><div><b>来源：</b>${esc(j.source)}</div><div><b>状态：</b>${esc(j.status)}</div>
-  <div><b>首次发现：</b>${esc(j.first_seen)}</div><div><b>最近看到：</b>${esc(j.last_seen)}</div>
-  <div><b>最后核验：</b>${esc(j.last_verified_at||'未核验')}</div><div><b>HTTP：</b>${esc(j.http_status??'—')}</div>
+  <div><b>首次发现：</b>${fmt(j.first_seen)}</div><div><b>最近看到：</b>${fmt(j.last_seen)}</div>
+  <div><b>最后核验：</b>${fmt(j.last_verified_at||'')}</div><div><b>HTTP：</b>${esc(j.http_status??'—')}</div>
   <div><b>存活判定：</b>${esc(j.liveness||'未复检')} ${esc(j.liveness_reason||'')}</div>
   <div><b>AI 判定依据：</b>${esc(j.ai_reason||'—')}</div>
   <div><b>申请链接：</b><a href="${esc(j.url||'#')}" target="_blank" rel="noreferrer">打开原始岗位</a></div>
@@ -225,12 +226,12 @@ async function openJob(id){
 function closeDrawer(){$('#drawer').classList.remove('open');}
 async function loadSignals(){
   const d=await api('/api/signals');
-  $('#signals-list').innerHTML=(d.items||[]).map(x=>`<div class="event" style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #eef3f9"><span class="badge none">${esc(x.tag)}</span><div><a href="${esc(x.url)}" target="_blank" rel="noreferrer" style="color:#172033;text-decoration:none;font-weight:600">${esc(x.title)}</a><div style="font-size:12px;color:#64748b;margin-top:4px">${esc(x.source)} · ${esc((x.published_at||'').slice(0,16))}</div></div></div>`).join('')||'<div class="empty">暂无信号</div>';
+  $('#signals-list').innerHTML=(d.items||[]).map(x=>`<div class="event" style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #eef3f9"><span class="badge none">${esc(x.tag)}</span><div><a href="${esc(x.url)}" target="_blank" rel="noreferrer" style="color:#172033;text-decoration:none;font-weight:600">${esc(x.title)}</a><div style="font-size:12px;color:#64748b;margin-top:4px">${esc(x.source)} · ${fmt(x.published_at)}</div></div></div>`).join('')||'<div class="empty">暂无信号</div>';
 }
 async function loadReport(){
   const d=await api('/api/report');
   $('#report-body').innerHTML=`<div class="kv" style="font-size:13px;line-height:2">
-    <div><b>生成时间：</b>${esc(d.generated_at)}</div>
+    <div><b>生成时间：</b>${fmt(d.generated_at)}</div>
     <div><b>AI 岗位：</b>共 ${d.total} 条（AI 研发 ${d.build} · AI 支撑 ${d.adjacent}），非 AI 已剔除 ${d.excluded||0} 条</div>
     <div><b>真实性：</b>已验证 ${d.verified} 条，待核验 ${d.pending} 条</div>
     <div><b>今日新增：</b>${d.today_new} 条；已合并重复 ${d.merged||0} 条；监控公司 ${d.companies} 家；舆情信号 ${d.signals} 条</div>
@@ -239,7 +240,7 @@ async function loadReport(){
 }
 async function loadSources(){
   const d=await api('/api/sources');
-  $('#sources-body').innerHTML=d.items.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.ats_type)}</td><td>${s.jobs}</td><td>${s.verified||0}</td><td>${esc((s.last_seen||'').slice(0,16))}</td></tr>`).join('');
+  $('#sources-body').innerHTML=d.items.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.ats_type)}</td><td>${s.jobs}</td><td>${s.verified||0}</td><td>${fmt(s.last_seen)}</td></tr>`).join('');
 }
 async function init(){
   await loadDashboard();
