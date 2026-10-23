@@ -74,9 +74,10 @@ const description =
 		<div class="mt-8 border-t border-[var(--line-divider)] pt-6 text-sm leading-7 text-75">
 			<h2 class="text-base font-bold text-90">口径与方法</h2>
 			<ul class="mt-2 list-disc pl-5 space-y-1">
-				<li><b>收录</b>：标题/描述命中 AI 词典（算法、大模型、机器学习、CV、NLP、多模态、AIGC、具身智能、Agent、MLOps…），并且岗位动作是研发或支撑职能。</li>
-				<li><b>排除</b>：只把 AI 当工具的职能岗（招聘、财务、税务、法务、销售、配送、客服），以及「（AI 驱动）」这类限定语；机器人硬件（结构/电子/嵌入式）不因「机器人」三字入库。</li>
-				<li><b>判定</b>：规则词典 v1，逐条写入 <code>ai_reason</code>（如 <code>title:大模型</code>、<code>function:税务</code>），不是模型打分；边界岗位保留并标注理由。</li>
+				<li><b>时间窗</b>：只收 <b>2026-06-01 之后发布</b>的岗位（今年 6 月起），更早的一律不展示、不计数。</li>
+				<li><b>收录</b>：标题命中 AI 词典（算法、大模型、机器学习、CV、NLP、多模态、AIGC、具身智能、Agent、MLOps…），并且岗位动作是研发或支撑职能。</li>
+				<li><b>排除</b>：只把 AI 当工具的职能岗（招聘、人事、人力资源、财务、税务、法务、销售、商务、渠道、配送、客服、内容运营），以及「（AI 驱动）」这类限定语；机器人硬件（结构/电子/嵌入式）不因「机器人」三字入库。</li>
+				<li><b>判定</b>：规则词典 v1.1，逐条写入 <code>ai_reason</code>（如 <code>title:大模型</code>、<code>function:渠道</code>），不是模型打分；「商业化/合规/负责人/TPM」这类 AI 业务管理岗归 <code>AI 支撑</code>，不算研发。</li>
 				<li><b>存活</b>：按来源分流核验。<code>active</code> = 当日详情接口/页面可读到投递入口；<code>uncertain</code> = 限流、反爬或页面异常，保留不判死；<code>expired</code> = 明确下线，转入关闭。</li>
 				<li><b>真实性 90 分</b> = 来源域名匹配 + 当日链接可访问，<b>不代表岗位真实存在或仍在招聘</b>；跨源交叉验证需要 ≥2 个独立来源，目前大多数岗位仍是单源。</li>
 				<li><b>样本偏差</b>：以国内招聘平台 + 海外公开 ATS（Greenhouse / Ashby）为主，<b>不代表全市场 AI 岗位</b>；同一岗位可能在多个渠道重复出现。</li>
