@@ -16,7 +16,8 @@ const description =
 				</p>
 			</div>
 			<div class="text-xs text-50 text-right leading-5">
-				<div>数据快照：<span id="generated-at">加载中…</span></div>
+				<div>数据采集：<span id="collected-at">—</span></div>
+				<div>页面导出：<span id="generated-at">加载中…</span></div>
 				<div>存活校验：<span id="liveness-at">—</span></div>
 			</div>
 		</div>
@@ -195,6 +196,7 @@ const description =
 				const d = await res.json();
 				state.all = d.items || [];
 				el("generated-at").textContent = (d.generated_at || "").replace("T", " ").slice(0, 16);
+				el("collected-at").textContent = localTime(d.collected_at);
 				el("liveness-at").textContent = localTime(d.updated_liveness);
 				el("foot-time").textContent = (d.generated_at || "").replace("T", " ").slice(0, 16);
 				renderStats(d);

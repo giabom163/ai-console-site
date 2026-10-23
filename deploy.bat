@@ -24,7 +24,7 @@ echo [2/3] 构建成功，正在上传到 Cloudflare Pages...
 echo.
 
 set CI=true
-call npx wrangler pages deploy ./dist --project-name giabom-blog --branch production
+call npx wrangler pages deploy ./dist --project-name giabom-blog --branch main
 if errorlevel 1 (
     echo.
     echo [错误] 上传失败！请看上面的报错。
