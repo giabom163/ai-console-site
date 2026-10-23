@@ -304,43 +304,6 @@ def remove_invisible_spans(doc, page_index):
     return n, left
 
 
-def _remove_invisible_spans_legacy(page, min_alpha=8, min_size=12.0):
-    """【已废弃，保留备查】旧版 redact 实现 —— 会误伤正文，勿再使用。
-
-    保留原因：记录「为什么不能用 redact」这一结论的代码证据（见上方注释 2）。
-    """
-    return 0
-
-
-def _remove_invisible_spans_legacy_impl(page, min_alpha=8, min_size=12.0):
-    n = 0
-    try:
-        dct = page.get_text("dict")
-    except Exception:
-        return 0
-    rects = []
-    for b in dct.get("blocks", []):
-        for l in b.get("lines", []):
-            for s in l.get("spans", []):
-                txt = s.get("text") or ""
-                if not txt.strip():
-                    continue
-                if is_watermark_text(txt):
-                    try:
-                        rects.append(fitz.Rect(*s["bbox"]))
-                    except Exception:
-                        pass
-    for r in rects:
-        page.add_redact_annot(r)          # 不 fill：避免白块盖住底层图片
-        n += 1
-    if rects:
-        try:
-            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-        except TypeError:
-            page.apply_redactions()       # 旧版 PyMuPDF 无此常量
-    return n
-
-
 def process_one(src, dst, plan, band=0.85, do_types=None, inplace=False):
     """处理单个文件。plan = 该文件的 findings 列表。返回处理摘要 dict。
 

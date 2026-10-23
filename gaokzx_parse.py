@@ -181,16 +181,6 @@ def detail_title(html):
     return unescape(m.group(1)).strip() if m else ""
 
 
-def detail_text(html):
-    """详情页正文纯文本（用于文件名兜底 / 交叉核对）。"""
-    m = re.search(r'<div[^>]*class="[^"]*(?:article|content|detail)[^"]*"[^>]*>(.*)', html, re.S | re.I)
-    seg = m.group(1) if m else html
-    seg = re.sub(r"<script.*?</script>", "", seg, flags=re.S | re.I)
-    seg = re.sub(r"<style.*?</style>", "", seg, flags=re.S | re.I)
-    t = re.sub(r"<[^>]+>", "\n", seg)
-    return unescape(t)
-
-
 # --------------------------------------------------------------------------
 # 专题页：抽表格（rowspan/colspan 展开）
 # --------------------------------------------------------------------------
@@ -201,17 +191,6 @@ ATTR_RE = re.compile(r'(\w[\w-]*)\s*=\s*"([^"]*)"')
 
 def _attrs(s):
     return {k.lower(): v for k, v in ATTR_RE.findall(s)}
-
-
-def table_grid(html, table_index=0):
-    """
-    把第 table_index 张表展开成二维网格（rowspan/colspan 已铺平）。
-    返回 [[cell_html, ...], ...]；同一个合并单元格会在它覆盖的每格重复出现。
-    """
-    tables = re.findall(r"<table\b.*?</table>", html, re.S | re.I)
-    if table_index >= len(tables):
-        return []
-    return grid_from_table(tables[table_index])
 
 
 def grid_from_table(tbl):
