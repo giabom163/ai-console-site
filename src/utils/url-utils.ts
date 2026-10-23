@@ -12,13 +12,15 @@ function joinUrl(...parts: string[]): string {
 	return joined.replace(/\/+/g, "/");
 }
 
+export const BLOG_PREFIX = "/blog";
+
 export function getPostUrlBySlug(slug: string): string {
-	return url(`/posts/${slug}/`);
+	return url(`${BLOG_PREFIX}/posts/${slug}/`);
 }
 
 export function getTagUrl(tag: string): string {
-	if (!tag) return url("/archive/");
-	return url(`/archive/?tag=${encodeURIComponent(tag.trim())}`);
+	if (!tag) return url(`${BLOG_PREFIX}/archive/`);
+	return url(`${BLOG_PREFIX}/archive/?tag=${encodeURIComponent(tag.trim())}`);
 }
 
 export function getCategoryUrl(category: string | null): string {
@@ -27,8 +29,8 @@ export function getCategoryUrl(category: string | null): string {
 		category.trim() === "" ||
 		category.trim().toLowerCase() === i18n(I18nKey.uncategorized).toLowerCase()
 	)
-		return url("/archive/?uncategorized=true");
-	return url(`/archive/?category=${encodeURIComponent(category.trim())}`);
+		return url(`${BLOG_PREFIX}/archive/?uncategorized=true`);
+	return url(`${BLOG_PREFIX}/archive/?category=${encodeURIComponent(category.trim())}`);
 }
 
 export function getDir(path: string): string {

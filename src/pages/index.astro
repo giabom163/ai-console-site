@@ -1,0 +1,232 @@
+---
+import MainGridLayout from "../layouts/MainGridLayout.astro";
+
+const title = "AI 岗位核查台";
+const description =
+	"公开的 AI 岗位聚合核查：来源、判定依据、链接存活状态与口径说明。数据每日更新。";
+---
+
+<MainGridLayout title={title} description={description}>
+	<div class="card-base px-4 py-6 md:px-9 md:py-8">
+		<div class="flex flex-wrap items-end justify-between gap-3">
+			<div>
+				<h1 class="text-2xl md:text-3xl font-bold text-90">AI 岗位核查台</h1>
+				<p class="mt-2 text-sm text-75">
+					聚合公开招聘页面里的 AI 研发 / AI 支撑岗位，逐条留下判定依据与链接存活状态。
+				</p>
+			</div>
+			<div class="text-xs text-50 text-right leading-5">
+				<div>数据快照：<span id="generated-at">加载中…</span></div>
+				<div>存活校验：<span id="liveness-at">—</span></div>
+			</div>
+		</div>
+
+		<div id="stats" class="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6"></div>
+		<div id="sources" class="mt-3 flex flex-wrap gap-2 text-[11px]"></div>
+
+		<div class="mt-6 flex flex-col gap-3 md:flex-row md:items-center">
+			<input
+				id="q"
+				type="search"
+				placeholder="搜岗位 / 公司 / 城市"
+				class="w-full md:w-72 rounded-lg border border-[var(--line-divider)] bg-[var(--btn-regular-bg)] px-3 py-2 text-sm text-90 outline-none focus:border-[var(--primary)]"
+			/>
+			<select id="type" class="rounded-lg border border-[var(--line-divider)] bg-[var(--btn-regular-bg)] px-3 py-2 text-sm text-90">
+				<option value="">全部类型</option>
+				<option value="build">AI 研发</option>
+				<option value="adjacent">AI 支撑</option>
+			</select>
+			<select id="source" class="rounded-lg border border-[var(--line-divider)] bg-[var(--btn-regular-bg)] px-3 py-2 text-sm text-90">
+				<option value="">全部来源</option>
+			</select>
+			<div class="text-xs text-50 md:ml-auto">
+				命中 <span id="hit" class="text-90 font-semibold">0</span> 条
+			</div>
+		</div>
+
+		<div class="mt-4 overflow-x-auto">
+			<table class="jobs-table w-full text-sm">
+				<thead>
+					<tr class="text-left text-50">
+						<th class="py-2 pr-3 font-normal">岗位</th>
+						<th class="py-2 pr-3 font-normal whitespace-nowrap">公司 / 来源</th>
+						<th class="py-2 pr-3 font-normal whitespace-nowrap">城市</th>
+						<th class="py-2 pr-3 font-normal whitespace-nowrap">类型</th>
+						<th class="py-2 pr-3 font-normal whitespace-nowrap">发布</th>
+						<th class="py-2 pr-3 font-normal whitespace-nowrap">链接</th>
+					</tr>
+				</thead>
+				<tbody id="rows">
+					<tr><td colspan="6" class="py-6 text-center text-50">正在加载数据…</td></tr>
+				</tbody>
+			</table>
+		</div>
+
+		<div class="mt-4 flex items-center justify-between text-xs text-50">
+			<div id="range">—</div>
+			<div class="flex gap-2">
+				<button id="prev" class="btn-regular px-3 py-1.5 rounded-lg text-xs" type="button">上一页</button>
+				<button id="next" class="btn-regular px-3 py-1.5 rounded-lg text-xs" type="button">下一页</button>
+			</div>
+		</div>
+
+		<div class="mt-8 border-t border-[var(--line-divider)] pt-6 text-sm leading-7 text-75">
+			<h2 class="text-base font-bold text-90">口径与方法</h2>
+			<ul class="mt-2 list-disc pl-5 space-y-1">
+				<li><b>收录</b>：标题/描述命中 AI 词典（算法、大模型、机器学习、CV、NLP、多模态、AIGC、具身智能、Agent、MLOps…），并且岗位动作是研发或支撑职能。</li>
+				<li><b>排除</b>：只把 AI 当工具的职能岗（招聘、财务、税务、法务、销售、配送、客服），以及「（AI 驱动）」这类限定语；机器人硬件（结构/电子/嵌入式）不因「机器人」三字入库。</li>
+				<li><b>判定</b>：规则词典 v1，逐条写入 <code>ai_reason</code>（如 <code>title:大模型</code>、<code>function:税务</code>），不是模型打分；边界岗位保留并标注理由。</li>
+				<li><b>存活</b>：按来源分流核验。<code>active</code> = 当日详情接口/页面可读到投递入口；<code>uncertain</code> = 限流、反爬或页面异常，保留不判死；<code>expired</code> = 明确下线，转入关闭。</li>
+				<li><b>真实性 90 分</b> = 来源域名匹配 + 当日链接可访问，<b>不代表岗位真实存在或仍在招聘</b>；跨源交叉验证需要 ≥2 个独立来源，目前大多数岗位仍是单源。</li>
+				<li><b>样本偏差</b>：以国内招聘平台 + 海外公开 ATS（Greenhouse / Ashby）为主，<b>不代表全市场 AI 岗位</b>；同一岗位可能在多个渠道重复出现。</li>
+			</ul>
+			<p class="mt-3 text-xs text-50">
+				数据来自公开招聘页面，仅作聚合索引与技术研究；如需下架某条记录，请在关于页留言。最后更新：<span id="foot-time">—</span>
+			</p>
+		</div>
+	</div>
+
+	<script>
+		const PAGE_SIZE = 50;
+		const state = { all: [], view: [], page: 0, q: "", type: "", source: "" };
+
+		const el = (id) => document.getElementById(id);
+
+		function esc(s) {
+			return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+		}
+
+		function statCard(label, value, sub) {
+			return `<div class="rounded-xl bg-[var(--btn-regular-bg)] px-4 py-3">
+				<div class="text-xs text-50">${label}</div>
+				<div class="mt-1 text-2xl font-bold text-90">${value}</div>
+				${sub ? `<div class="text-[11px] text-50">${sub}</div>` : ""}
+			</div>`;
+		}
+
+		function renderStats(d) {
+			const t = d.totals;
+			el("stats").innerHTML = [
+				statCard("在招 AI 岗位", t.ai_open, d.scope),
+				statCard("AI 研发", t.build, "build"),
+				statCard("AI 支撑", t.adjacent, "adjacent"),
+				statCard("来源公司", t.sources, `${t.companies} 家公司`),
+				statCard("链接可访问", t.liveness_ok, `已校验 ${t.liveness_checked} 条`),
+				statCard("待校验", t.ai_open - t.liveness_checked, "下一轮补齐"),
+			].join("");
+			el("sources").innerHTML = (d.by_source || [])
+				.map((s) => `<span class="rounded-full bg-[var(--btn-regular-bg)] px-2.5 py-1 text-75">${esc(s.name)} · ${s.count}</span>`)
+				.join("");
+		}
+
+		function localTime(s) {
+			if (!s) return "—";
+			const d = new Date(s.replace(" ", "T") + "Z");
+			if (Number.isNaN(d.getTime())) return s;
+			return d.toLocaleString("zh-CN", { hour12: false });
+		}
+
+		function apply() {
+			const q = state.q.trim().toLowerCase();
+			state.view = state.all.filter((j) => {
+				if (state.type && j.type !== state.type) return false;
+				if (state.source && j.company !== state.source) return false;
+				if (!q) return true;
+				return (j.title + " " + j.company + " " + j.location).toLowerCase().includes(q);
+			});
+			const maxPage = Math.max(0, Math.ceil(state.view.length / PAGE_SIZE) - 1);
+			if (state.page > maxPage) state.page = maxPage;
+			renderRows();
+		}
+
+		function renderRows() {
+			const rows = el("rows");
+			const total = state.view.length;
+			el("hit").textContent = total;
+			if (!total) {
+				rows.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-50">没有符合条件的岗位</td></tr>`;
+				el("range").textContent = "—";
+				return;
+			}
+			const start = state.page * PAGE_SIZE;
+			const slice = state.view.slice(start, start + PAGE_SIZE);
+			rows.innerHTML = slice
+				.map((j) => {
+					const t = j.type === "build" ? "AI 研发" : "AI 支撑";
+					const badge = j.type === "build"
+						? "text-[var(--primary)]"
+						: "text-75";
+					const live = j.liveness === "active"
+						? `<span class="text-green-600 dark:text-green-400">可访问</span>`
+						: j.liveness === "uncertain"
+							? `<span class="text-amber-600 dark:text-amber-400">待复核</span>`
+							: j.liveness === "expired"
+								? `<span class="text-red-500">已下线</span>`
+								: `<span class="text-50">未核验</span>`;
+					return `<tr class="border-t border-[var(--line-divider)] align-top">
+						<td class="py-2.5 pr-3">
+							<div class="text-90">${esc(j.title)}</div>
+							${j.reason ? `<div class="mt-0.5 text-[11px] text-50">依据 ${esc(j.reason)}</div>` : ""}
+						</td>
+						<td class="py-2.5 pr-3 whitespace-nowrap text-75">${esc(j.company)}</td>
+						<td class="py-2.5 pr-3 text-75">${esc(j.location || "—")}</td>
+						<td class="py-2.5 pr-3 whitespace-nowrap">
+							<span class="rounded-md px-1.5 py-0.5 text-[11px] ${badge}">${t}</span>
+						</td>
+						<td class="py-2.5 pr-3 whitespace-nowrap text-75">${esc(j.posted_at || "—")}</td>
+						<td class="py-2.5 pr-3 whitespace-nowrap">${live}</td>
+					</tr>
+					<tr class="border-0">
+						<td colspan="6" class="pb-2 pt-0 text-[11px] text-50">
+							${j.url ? `<a class="hover:text-[var(--primary)] underline underline-offset-2" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer nofollow">查看原始岗位</a>` : "无原始链接"}
+						</td>
+					</tr>`;
+				})
+				.join("");
+			el("range").textContent = `第 ${start + 1}–${Math.min(start + PAGE_SIZE, total)} 条 / 共 ${total} 条`;
+			el("prev").disabled = state.page === 0;
+			el("next").disabled = start + PAGE_SIZE >= total;
+		}
+
+		async function init() {
+			try {
+				const res = await fetch("/data/ai-jobs.json", { cache: "no-cache" });
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				const d = await res.json();
+				state.all = d.items || [];
+				el("generated-at").textContent = (d.generated_at || "").replace("T", " ").slice(0, 16);
+				el("liveness-at").textContent = localTime(d.updated_liveness);
+				el("foot-time").textContent = (d.generated_at || "").replace("T", " ").slice(0, 16);
+				renderStats(d);
+				const sel = el("source");
+				for (const s of d.by_source || []) {
+					const o = document.createElement("option");
+					o.value = s.name;
+					o.textContent = `${s.name}（${s.count}）`;
+					sel.appendChild(o);
+				}
+				apply();
+			} catch (err) {
+				el("rows").innerHTML = `<tr><td colspan="6" class="py-8 text-center text-red-500">数据加载失败：${esc(err.message)}</td></tr>`;
+			}
+		}
+
+		el("q").addEventListener("input", (e) => { state.q = e.target.value; state.page = 0; apply(); });
+		el("type").addEventListener("change", (e) => { state.type = e.target.value; state.page = 0; apply(); });
+		el("source").addEventListener("change", (e) => { state.source = e.target.value; state.page = 0; apply(); });
+		el("prev").addEventListener("click", () => { if (state.page > 0) { state.page--; renderRows(); } });
+		el("next").addEventListener("click", () => { state.page++; apply(); });
+
+		init();
+	</script>
+
+	<style>
+		.jobs-table th,
+		.jobs-table td {
+			vertical-align: top;
+		}
+		.jobs-table tbody tr:first-child {
+			border-top: 1px solid var(--line-divider);
+		}
+	</style>
+</MainGridLayout>
