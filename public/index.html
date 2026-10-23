@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 就业核查台</title>
+<style>
+:root{--bg:#f4f7fb;--card:#fff;--ink:#172033;--muted:#64748b;--line:#e4ebf3;--blue:#1d4ed8;--green:#0f766e;--red:#b42318;--amber:#b45309}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei","PingFang SC",Arial,sans-serif}
+header{background:linear-gradient(135deg,#0f2a4a,#153e75);color:#fff;padding:18px 28px;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:20px;margin:0;letter-spacing:1px}header .sub{font-size:12px;opacity:.75;margin-top:4px}
+nav{display:flex;gap:8px}nav button{border:0;background:rgba(255,255,255,.12);color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+nav button.active{background:#fff;color:#153e75}
+main{max-width:1280px;margin:22px auto;padding:0 20px}
+.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:0 6px 18px rgba(15,42,74,.05)}
+.card .n{font-size:28px;font-weight:700;color:var(--blue)}.card .l{font-size:12px;color:var(--muted);margin-top:4px}
+.card.green .n{color:var(--green)}.card.amber .n{color:var(--amber)}
+.grid{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;margin-top:14px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:0 6px 18px rgba(15,42,74,.04)}
+.panel h2{font-size:15px;margin:0 0 12px;padding-left:9px;border-left:3px solid var(--blue)}
+.bar{display:grid;grid-template-columns:110px 1fr 46px;gap:10px;align-items:center;font-size:12px;margin:8px 0}
+.track{background:#eef3f9;height:9px;border-radius:7px;overflow:hidden}.track i{display:block;height:100%;background:var(--blue);border-radius:7px}
+.bar b{text-align:right}
+.legend{font-size:11px;color:var(--muted);display:flex;gap:14px;margin-bottom:8px}
+.legend span::before{content:"";display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;background:var(--blue)}
+.legend .closed::before{background:#e05a47}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--muted);font-weight:500;padding:10px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px 8px;border-bottom:1px solid #f1f5fa;vertical-align:top}
+tr.row{cursor:pointer}tr.row:hover{background:#f8fbff}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;white-space:nowrap}
+.badge.build{background:#e8f7ef;color:#067647}.badge.adjacent{background:#eef4ff;color:#1d4ed8}.badge.exposed{background:#fff4e5;color:#b45309}.badge.none{background:#f1f5f9;color:#64748b}
+.badge.verified{background:#e8f7ef;color:#067647}.badge.trusted{background:#eef4ff;color:#1d4ed8}.badge.pending{background:#fff7ed;color:#b45309}.badge.low{background:#fef2f2;color:#b42318}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+input,select{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px}
+input{min-width:220px}
+.drawer{position:fixed;right:0;top:0;bottom:0;width:520px;max-width:94vw;background:#fff;box-shadow:-10px 0 30px rgba(15,42,74,.16);padding:22px;overflow:auto;transform:translateX(105%);transition:.2s}
+.drawer.open{transform:none}.drawer h3{margin:0 0 4px;font-size:18px}.drawer .meta{font-size:12px;color:var(--muted);margin-bottom:14px}
+.drawer .kv{font-size:12px;line-height:1.9;color:#334155}.drawer .kv b{color:#0f172a}
+.close{float:right;border:0;background:#f1f5f9;border-radius:8px;padding:6px 10px;cursor:pointer}
+.empty{color:var(--muted);font-size:13px;padding:20px 0;text-align:center}
+.pager{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.pager button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer}
+footer{text-align:center;color:var(--muted);font-size:11px;padding:26px 0}
+@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.drawer{width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>AI 就业核查台</h1><div class="sub">岗位真实性 · 每日新增/关闭 · 来源可追溯</div></div>
+  <nav>
+    <button data-view="dashboard" class="active">总览</button>
+    <button data-view="jobs">岗位库</button>
+    <button data-view="signals">就业舆情</button>
+    <button data-view="report">日报</button>
+    <button data-view="sources">数据源</button>
+  </nav>
+</header>
+<main>
+  <section id="view-dashboard">
+    <div class="cards" id="cards"></div>
+    <div class="grid">
+      <div class="panel"><h2>近 14 天新增 / 关闭</h2><div class="legend"><span>新增</span><span class="closed">关闭</span></div><div id="trend"></div></div>
+      <div class="panel"><h2>真实性分布</h2><div id="levels"></div></div>
+    </div>
+    <div class="grid">
+      <div class="panel"><h2>在招最多的公司</h2><div id="companies"></div></div>
+      <div class="panel"><h2>缺口提示</h2><div class="kv" id="notes"></div></div>
+    </div>
+  </section>
+
+  <section id="view-jobs" hidden>
+    <div class="panel">
+      <h2>岗位库</h2>
+      <div class="toolbar">
+        <input id="q" placeholder="搜公司 / 岗位">
+        <select id="f-company"><option value="">全部公司</option></select>
+        <select id="f-ai"><option value="ai">只看 AI 岗位</option><option value="">全部类型</option><option value="build">AI 研发（build）</option><option value="adjacent">AI 支撑（adjacent）</option><option value="none">非 AI（已剔除）</option></select>
+        <select id="f-level"><option value="">全部真实性</option><option>已验证</option><option>可信</option><option>待核验</option><option>低可信</option></select>
+        <select id="f-since"><option value="recent">近 3 个月</option><option value="2026-06-01">6 月之后</option><option value="all">全部时间</option></select>
+        <select id="f-status"><option value="open">在招</option><option value="closed">已关闭</option><option value="stale">长期未见</option><option value="">全部</option></select>
+        <button onclick="loadJobs(0)">筛选</button>
+      </div>
+      <div id="jobs-meta" class="meta"></div>
+      <table><thead><tr><th>公司</th><th>岗位</th><th>地点</th><th>AI</th><th>真实性</th><th>发布时间</th><th>首次发现</th><th>状态</th></tr></thead><tbody id="jobs-body"></tbody></table>
+      <div class="pager"><button onclick="pageJobs(-1)">上一页</button><button onclick="pageJobs(1)">下一页</button></div>
+    </div>
+  </section>
+
+  <section id="view-signals" hidden>
+    <div class="panel"><h2>就业舆情 / 裁员信号</h2><p style="font-size:12px;color:#64748b">当前接入 AIHOT RSS；裁员信号源待接。</p><div id="signals-list"></div></div>
+  </section>
+
+  <section id="view-report" hidden>
+    <div class="panel"><h2>今日日报</h2><div id="report-body"></div></div>
+  </section>
+
+  <section id="view-sources" hidden>
+    <div class="panel"><h2>数据源健康</h2><table><thead><tr><th>公司</th><th>ATS</th><th>岗位数</th><th>已验证</th><th>最近看到</th></tr></thead><tbody id="sources-body"></tbody></table></div>
+  </section>
+</main>
+<div class="drawer" id="drawer"><button class="close" onclick="closeDrawer()">关闭</button><div id="drawer-body"></div></div>
+<footer>数据来自公开 ATS；真实性为来源可信度，不是对雇主的法律判断。</footer>
+
+<script>
+(function(){
+  var cache = {};
+  async function data(){
+    if(!cache.d){ var r = await fetch('./console-data.json', {cache:'no-cache'}); cache.d = await r.json(); }
+    return cache.d;
+  }
+  var orig = window.fetch ? window.fetch.bind(window) : null;
+  function resp(obj){ return new Response(JSON.stringify(obj), {status:200, headers:{'Content-Type':'application/json'}}); }
+  window.fetch = async function(input, init){
+    var u = (typeof input === 'string') ? input : ((input && input.url) || '');
+    var url = new URL(u, location.href);
+    if (url.pathname.indexOf('/api/') !== 0) return orig ? orig(input, init) : Promise.reject(new Error('no fetch'));
+    var d = await data();
+    if (url.pathname === '/api/stats') return resp(d.stats);
+    if (url.pathname === '/api/sources') return resp({items: d.sources});
+    if (url.pathname === '/api/signals') return resp({items: d.signals || []});
+    if (url.pathname === '/api/report') return resp(d.report);
+    if (url.pathname === '/api/jobs') {
+      var p = url.searchParams;
+      var items = d.jobs.slice();
+      var q = (p.get('q') || '').trim().toLowerCase();
+      if (q) items = items.filter(function(j){ return ((j.title||'') + ' ' + (j.company||'')).toLowerCase().indexOf(q) >= 0; });
+      var company = p.get('company');
+      if (company) items = items.filter(function(j){ return j.company === company; });
+      var ai = p.get('ai');
+      if (ai === 'ai') items = items.filter(function(j){ return j.ai_relevance === 'build' || j.ai_relevance === 'adjacent'; });
+      else if (ai) items = items.filter(function(j){ return j.ai_relevance === ai; });
+      var level = p.get('level');
+      if (level) items = items.filter(function(j){ return j.authenticity_level === level; });
+      var total = items.length;
+      var limit = parseInt(p.get('limit') || '30', 10);
+      var offset = parseInt(p.get('offset') || '0', 10);
+      return resp({total: total, limit: limit, offset: offset, since: d.stats.window_since,
+                   items: items.slice(offset, offset + limit)});
+    }
+    var m = url.pathname.match(/^\/api\/jobs\/(.+)$/);
+    if (m) {
+      var id = decodeURIComponent(m[1]);
+      var job = null;
+      for (var i = 0; i < d.jobs.length; i++) if (d.jobs[i].id === id) { job = d.jobs[i]; break; }
+      if (!job) return new Response(JSON.stringify({error:'not found'}), {status:404});
+      return resp({job: job, snapshots: [], changes: []});
+    }
+    return new Response(JSON.stringify({error:'not found'}), {status:404});
+  };
+})();
+</script>
+
+<script>
+const $ = s => document.querySelector(s);
+let jobOffset = 0, jobTotal = 0;
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function badge(v){const m={'build':'build','adjacent':'adjacent','exposed':'exposed','none':'none'};const l={'build':'AI研发','adjacent':'AI支撑','exposed':'受影响','none':'非AI'};return `<span class="badge ${m[v]||'none'}">${esc(l[v]||v)}</span>`;}
+function levelBadge(v){const m={'已验证':'verified','可信':'trusted','待核验':'pending','低可信':'low'};return `<span class="badge ${m[v]||'pending'}">${esc(v)}</span>`;}
+async function api(u){const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+function curSince(){const v=$('#f-since')?$('#f-since').value:'recent';return v==='recent'?'':v;}
+async function loadDashboard(){
+  const since=curSince();
+  const d=await api('/api/stats'+(since?'?since='+encodeURIComponent(since):''));
+  $('#cards').innerHTML=[['AI 岗位',d.ai_total,''],['AI 研发',d.build,'green'],['AI 支撑',d.adjacent,''],['已验证',d.verified,'green'],['已剔除非 AI',d.excluded,'amber']]
+    .map(([l,n,c])=>`<div class="card ${c}"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+  renderTrend(d.trend||[]);
+  const max=Math.max(...(d.levels||[]).map(x=>x.value),1);
+  $('#levels').innerHTML=(d.levels||[]).map(x=>`<div class="bar"><span>${esc(x.label)}</span><span class="track"><i style="width:${x.value/max*100}%;background:${x.label==='已验证'?'#0f766e':x.label==='低可信'?'#b42318':'#1d4ed8'}"></i></span><b>${x.value}</b></div>`).join('')||'<div class="empty">暂无</div>';
+  const cmax=Math.max(...(d.top_companies||[]).map(x=>x.value),1);
+  $('#companies').innerHTML=(d.top_companies||[]).map(x=>`<div class="bar"><span>${esc(x.label)}</span><span class="track"><i style="width:${x.value/cmax*100}%"></i></span><b>${x.value}</b></div>`).join('')||'<div class="empty">暂无</div>';
+  $('#notes').innerHTML=`<div>• 时间窗口：<b>${d.window_since}</b> 起（默认近 3 个月，不早于 2026-06-01；更早岗位不展示、不再采集）</div><div>• 今日新增：<b>${d.today_new}</b></div><div>• 存活复检：<b>${d.liveness_checked||0}</b> 条已核（已关闭 ${d.closed||0} · 长期未见 ${d.stale||0}）</div><div>• 非 AI 岗位已剔除 <b>${d.excluded||0}</b> 条（词典判定 none，保留原始记录不物理删除）</div><div>• 已合并重复：<b>${d.merged||0}</b> 条（同公司/同岗位/同城市，保留最新）</div><div>• 已验证 ${d.verified} 条，其余为“待核验”，需继续做 URL 校验。</div><div>• 口径：build=直接研发 AI，adjacent=直接支撑 AI；关键词采集，非全站岗位。</div>`;
+}
+function renderTrend(rows){
+  if(!rows.length){$('#trend').innerHTML='<div class="empty">暂无趋势</div>';return;}
+  if(rows.length===1){
+    const r=rows[0],max=Math.max(r.new_jobs||0,r.closed_jobs||0,1);
+    $('#trend').innerHTML=`<div class="bar"><span>${esc(r.day)} 新增</span><span class="track"><i style="width:${(r.new_jobs||0)/max*100}%;background:#1d4ed8"></i></span><b>${r.new_jobs||0}</b></div>
+    <div class="bar"><span>${esc(r.day)} 关闭</span><span class="track"><i style="width:${(r.closed_jobs||0)/max*100}%;background:#e05a47"></i></span><b>${r.closed_jobs||0}</b></div>
+    <p style="font-size:12px;color:#64748b">首次入库，只有一天数据；后续每天追加后显示双线趋势。</p>`;
+    return;
+  }
+  const W=620,H=210,PL=34,PR=12,PT=12,PB=26;
+  const max=Math.max(...rows.map(r=>Math.max(r.new_jobs||0,r.closed_jobs||0)),1);
+  const x=i=>PL+(W-PL-PR)*i/Math.max(rows.length-1,1);
+  const y=v=>PT+(H-PT-PB)*(1-v/max);
+  const line=(key,color)=>{const pts=rows.map((r,i)=>`${x(i).toFixed(1)},${y(r[key]||0).toFixed(1)}`).join(' ');return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2.2"/>`;};
+  const labels=rows.map((r,i)=> i%3===0?`<text x="${x(i).toFixed(1)}" y="${H-8}" font-size="9" fill="#94a3b8" text-anchor="middle">${esc(r.day.slice(5))}</text>`:'').join('');
+  $('#trend').innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" height="210">
+  ${[0,1,2,3].map(k=>`<line x1="${PL}" y1="${y(max*k/3).toFixed(1)}" x2="${W-PR}" y2="${y(max*k/3).toFixed(1)}" stroke="#eef3f9"/>`).join('')}
+  ${line('new_jobs','#1d4ed8')}${line('closed_jobs','#e05a47')}${labels}
+  ${rows.map((r,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(r.new_jobs||0).toFixed(1)}" r="2.2" fill="#1d4ed8"/>`).join('')}</svg>`;
+}
+async function loadJobs(offset=jobOffset){
+  jobOffset=offset;
+  const p=new URLSearchParams({limit:30,offset,status:$('#f-status').value||'open'});
+  if($('#q').value.trim())p.set('q',$('#q').value.trim());
+  if($('#f-company').value)p.set('company',$('#f-company').value);
+  if($('#f-ai').value)p.set('ai',$('#f-ai').value);
+  if($('#f-level').value)p.set('level',$('#f-level').value);
+  if(curSince())p.set('since',curSince());
+  const d=await api('/api/jobs?'+p);
+  jobTotal=d.total;
+  $('#jobs-meta').textContent=`共 ${d.total} 条，当前 ${d.offset+1}-${Math.min(d.offset+d.items.length,d.total)}`;
+  $('#jobs-body').innerHTML=d.items.map(j=>`<tr class="row" onclick="openJob('${j.id}')">
+    <td>${esc(j.company)}</td><td>${esc(j.title)}</td><td>${esc(j.location||'—')}</td>
+    <td>${badge(j.ai_relevance)}</td><td>${levelBadge(j.authenticity_level)} ${Math.round(j.authenticity_score)}</td>
+    <td>${esc(j.posted_at?(j.posted_at.slice(0,10)):'—')}</td><td>${esc((j.first_seen||'').slice(0,10))}</td><td>${esc(j.status)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">没有匹配岗位</td></tr>';
+}
+function pageJobs(delta){const next=jobOffset+delta*30;if(next<0||next>=jobTotal)return;loadJobs(next);}
+async function openJob(id){
+  const d=await api('/api/jobs/'+encodeURIComponent(id));const j=d.job;
+  $('#drawer-body').innerHTML=`<h3>${esc(j.title)}</h3><div class="meta">${esc(j.company)} · ${esc(j.location||'')} · ${esc(j.ai_relevance)} · ${esc(j.authenticity_level)} ${Math.round(j.authenticity_score)}</div>
+  <div class="kv"><div><b>来源：</b>${esc(j.source)}</div><div><b>状态：</b>${esc(j.status)}</div>
+  <div><b>首次发现：</b>${esc(j.first_seen)}</div><div><b>最近看到：</b>${esc(j.last_seen)}</div>
+  <div><b>最后核验：</b>${esc(j.last_verified_at||'未核验')}</div><div><b>HTTP：</b>${esc(j.http_status??'—')}</div>
+  <div><b>存活判定：</b>${esc(j.liveness||'未复检')} ${esc(j.liveness_reason||'')}</div>
+  <div><b>AI 判定依据：</b>${esc(j.ai_reason||'—')}</div>
+  <div><b>申请链接：</b><a href="${esc(j.url||'#')}" target="_blank" rel="noreferrer">打开原始岗位</a></div>
+  <div><b>薪资：</b>${j.salary_min?`${esc(j.currency||'')} ${j.salary_min}–${j.salary_max||''}`:'未披露'}</div></div>
+  <p style="font-size:12px;color:#64748b;margin-top:16px">真实性为来源可信度：ATS 原始来源、域名匹配、最近确认共同决定；不是对雇主的法律判断。</p>`;
+  $('#drawer').classList.add('open');
+}
+function closeDrawer(){$('#drawer').classList.remove('open');}
+async function loadSignals(){
+  const d=await api('/api/signals');
+  $('#signals-list').innerHTML=(d.items||[]).map(x=>`<div class="event" style="display:flex;gap:10px;padding:10px 0;border-bottom:1px solid #eef3f9"><span class="badge none">${esc(x.tag)}</span><div><a href="${esc(x.url)}" target="_blank" rel="noreferrer" style="color:#172033;text-decoration:none;font-weight:600">${esc(x.title)}</a><div style="font-size:12px;color:#64748b;margin-top:4px">${esc(x.source)} · ${esc((x.published_at||'').slice(0,16))}</div></div></div>`).join('')||'<div class="empty">暂无信号</div>';
+}
+async function loadReport(){
+  const d=await api('/api/report');
+  $('#report-body').innerHTML=`<div class="kv" style="font-size:13px;line-height:2">
+    <div><b>生成时间：</b>${esc(d.generated_at)}</div>
+    <div><b>AI 岗位：</b>共 ${d.total} 条（AI 研发 ${d.build} · AI 支撑 ${d.adjacent}），非 AI 已剔除 ${d.excluded||0} 条</div>
+    <div><b>真实性：</b>已验证 ${d.verified} 条，待核验 ${d.pending} 条</div>
+    <div><b>今日新增：</b>${d.today_new} 条；已合并重复 ${d.merged||0} 条；监控公司 ${d.companies} 家；舆情信号 ${d.signals} 条</div>
+    <div><b>Top 公司：</b>${(d.top_companies||[]).map(x=>x.label+' '+x.value).join(' · ')}</div>
+    <div style="margin-top:10px;color:#64748b">${esc(d.note)}</div></div>`;
+}
+async function loadSources(){
+  const d=await api('/api/sources');
+  $('#sources-body').innerHTML=d.items.map(s=>`<tr><td>${esc(s.name)}</td><td>${esc(s.ats_type)}</td><td>${s.jobs}</td><td>${s.verified||0}</td><td>${esc((s.last_seen||'').slice(0,16))}</td></tr>`).join('');
+}
+async function init(){
+  await loadDashboard();
+  const s=await api('/api/sources');
+  $('#f-company').innerHTML='<option value="">全部公司</option>'+s.items.map(x=>`<option>${esc(x.name)}</option>`).join('');
+  await loadJobs(0);
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+  ['dashboard','jobs','signals','report','sources'].forEach(v=>$('#view-'+v).hidden=(v!==b.dataset.view));
+  if(b.dataset.view==='jobs')loadJobs(0);
+  if(b.dataset.view==='signals')loadSignals();
+  if(b.dataset.view==='report')loadReport();
+  if(b.dataset.view==='sources')loadSources();
+});
+document.querySelectorAll('#f-since,#f-ai,#f-level,#f-status').forEach(s=>s.onchange=()=>{loadJobs(0);loadDashboard();});
+init().catch(e=>{document.querySelector('main').innerHTML='<div class="empty">加载失败：'+esc(e.message)+'</div>';});
+</script>
+</body>
+</html>
+
+

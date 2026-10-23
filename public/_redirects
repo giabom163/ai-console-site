@@ -1,4 +1,6 @@
-/posts/* /blog/posts/:splat 301
-/posts /blog/ 301
-/archive/* /blog/archive/:splat 301
-/archive /blog/archive/ 301
+/blog/* / 301
+/blog / 301
+/posts/* / 301
+/archive/* / 301
+/jobs/* / 301
+/jobs / 301
